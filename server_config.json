@@ -1,0 +1,7 @@
+{
+    "host": "mqtt.meshtastic.org",
+    "port": 1883,
+    "username": "meshdev",
+    "password": "large4cats",
+    "root_topic": "msh/EU_868"
+}
