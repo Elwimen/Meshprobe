@@ -158,9 +158,13 @@ def main():
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')
 
-    if not client.connect(use_listener_id=use_listener_id, subscribe=subscribe):
-        print("Failed to connect to MQTT broker")
-        sys.exit(1)
+    try:
+        if not client.connect(use_listener_id=use_listener_id, subscribe=subscribe):
+            print("Failed to connect to MQTT broker")
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nConnection cancelled by user")
+        sys.exit(0)
 
     try:
         if args.command == 'map':
