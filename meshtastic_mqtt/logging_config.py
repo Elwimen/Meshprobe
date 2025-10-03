@@ -34,10 +34,16 @@ def setup_logging(level: str = 'WARNING', module_levels: Optional[dict] = None, 
     Setup logging configuration.
 
     Args:
-        level: Default log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        level: Default log level (DEBUG, INFO, WARNING, ERROR, CRITICAL, NONE)
         module_levels: Dict of module-specific levels, e.g. {'client': 'DEBUG', 'parsers': 'INFO'}
         use_color: Use colored output for log messages
     """
+    # Handle NONE - disable all logging
+    if level.upper() == 'NONE':
+        root_logger = logging.getLogger('meshtastic_mqtt')
+        root_logger.setLevel(logging.CRITICAL + 1)  # Higher than any level
+        return
+
     log_level = getattr(logging, level.upper(), logging.WARNING)
 
     handler = logging.StreamHandler(sys.stderr)

@@ -29,9 +29,9 @@ def main():
                        help='Override MQTT root topic (e.g., msh, msh/EU_868/HR)')
     parser.add_argument('--create-configs', action='store_true',
                        help='Create default configuration files')
-    parser.add_argument('--log-level', default='WARNING',
-                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                       help='Set logging level')
+    parser.add_argument('--log-level', default='CRITICAL',
+                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL', 'NONE'],
+                       help='Set logging level (NONE = disable logging)')
     parser.add_argument('--debug-modules', type=str,
                        help='Comma-separated list of modules to debug (e.g., client,parsers)')
 
