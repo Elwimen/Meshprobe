@@ -18,10 +18,20 @@ from .models import (
     DeviceTelemetry, EnvironmentTelemetry, RoutingInfo,
     NeighborInfo, NeighborData, MapReport, ParsedMessage
 )
+from .node_db import NodeDatabase
 
 
 class MessageParser:
     """Parser for Meshtastic protobuf messages."""
+
+    def __init__(self, node_db: Optional[NodeDatabase] = None):
+        """
+        Initialize MessageParser.
+
+        Args:
+            node_db: Optional NodeDatabase to populate with node info
+        """
+        self.node_db = node_db
 
     @staticmethod
     def parse_packet_info(packet) -> PacketInfo:
@@ -46,7 +56,7 @@ class MessageParser:
             want_ack=packet.want_ack if hasattr(packet, 'want_ack') else False,
         )
 
-    def parse_message_content(self, portnum: int, payload: bytes) -> Optional[
+    def parse_message_content(self, portnum: int, payload: bytes, from_node_hex: str = None, to_node_hex: str = None) -> Optional[
         TextMessage | PositionData | NodeInfo | DeviceTelemetry |
         EnvironmentTelemetry | RoutingInfo | NeighborInfo | MapReport
     ]:
@@ -56,47 +66,80 @@ class MessageParser:
         """
         match portnum:
             case portnums_pb2.TEXT_MESSAGE_APP:
-                return self._parse_text_message(payload)
+                return self._parse_text_message(payload, from_node_hex, to_node_hex)
             case portnums_pb2.POSITION_APP:
-                return self._parse_position(payload)
+                return self._parse_position(payload, from_node_hex)
             case portnums_pb2.NODEINFO_APP:
                 return self._parse_nodeinfo(payload)
             case portnums_pb2.TELEMETRY_APP:
-                return self._parse_telemetry(payload)
+                return self._parse_telemetry(payload, from_node_hex)
             case portnums_pb2.ROUTING_APP:
                 return self._parse_routing(payload)
             case portnums_pb2.NEIGHBORINFO_APP:
                 return self._parse_neighborinfo(payload)
             case portnums_pb2.MAP_REPORT_APP:
-                return self._parse_map_report(payload)
+                return self._parse_map_report(payload, from_node_hex)
             case _:
                 return None
 
-    @staticmethod
-    def _parse_text_message(payload: bytes) -> TextMessage:
+    def _parse_text_message(self, payload: bytes, from_node_hex: str = None, to_node_hex: str = None) -> TextMessage:
         """Parse text message payload."""
         text = payload.decode('utf-8', errors='replace')
         is_encrypted = text.startswith('U2FsdGVk')
+
+        # Log message to sender's node database
+        if self.node_db is not None and from_node_hex:
+            self.node_db.add_message(
+                node_id=from_node_hex,
+                text=text,
+                direction='sent',
+                encrypted=is_encrypted,
+                from_node=from_node_hex,
+                to_node=to_node_hex
+            )
+
+        # Log message to receiver's node database (if not broadcast)
+        if self.node_db is not None and to_node_hex and to_node_hex != '!ffffffff':
+            self.node_db.add_message(
+                node_id=to_node_hex,
+                text=text,
+                direction='received',
+                encrypted=is_encrypted,
+                from_node=from_node_hex,
+                to_node=to_node_hex
+            )
+
         return TextMessage(text=text, is_openssl_encrypted=is_encrypted)
 
-    @staticmethod
-    def _parse_position(payload: bytes) -> Optional[PositionData]:
+    def _parse_position(self, payload: bytes, from_node_hex: str = None) -> Optional[PositionData]:
         """Parse position payload."""
         try:
             position = mesh_pb2.Position()
             position.ParseFromString(payload)
-            return PositionData(
+
+            pos_data = PositionData(
                 latitude=position.latitude_i / 1e7,
                 longitude=position.longitude_i / 1e7,
                 altitude=position.altitude,
                 time=position.time if position.time else None,
                 precision_bits=position.precision_bits if hasattr(position, 'precision_bits') else None
             )
+
+            # Add to node database if available
+            if self.node_db is not None and from_node_hex:
+                self.node_db.add_position(
+                    node_id=from_node_hex,
+                    latitude=pos_data.latitude,
+                    longitude=pos_data.longitude,
+                    altitude=pos_data.altitude,
+                    timestamp=pos_data.time
+                )
+
+            return pos_data
         except Exception:
             return None
 
-    @staticmethod
-    def _parse_nodeinfo(payload: bytes) -> Optional[NodeInfo]:
+    def _parse_nodeinfo(self, payload: bytes) -> Optional[NodeInfo]:
         """Parse node info payload."""
         try:
             user = mesh_pb2.User()
@@ -113,7 +156,7 @@ class MessageParser:
             if user.macaddr:
                 macaddr = ':'.join(f'{b:02X}' for b in user.macaddr)
 
-            return NodeInfo(
+            node_info = NodeInfo(
                 node_id=user.id if user.id else None,
                 long_name=user.long_name if user.long_name else None,
                 short_name=user.short_name if user.short_name else None,
@@ -121,11 +164,22 @@ class MessageParser:
                 hw_model=user.hw_model if user.hw_model else None,
                 hw_model_name=hw_model_name
             )
+
+            # Add to node database if available
+            if self.node_db is not None and node_info.node_id:
+                self.node_db.add_node(
+                    node_id=node_info.node_id,
+                    long_name=node_info.long_name,
+                    short_name=node_info.short_name,
+                    hw_model=node_info.hw_model,
+                    macaddr=macaddr
+                )
+
+            return node_info
         except Exception:
             return None
 
-    @staticmethod
-    def _parse_telemetry(payload: bytes) -> Optional[DeviceTelemetry | EnvironmentTelemetry]:
+    def _parse_telemetry(self, payload: bytes, from_node_hex: str = None) -> Optional[DeviceTelemetry | EnvironmentTelemetry]:
         """Parse telemetry payload."""
         try:
             telemetry = telemetry_pb2.Telemetry()
@@ -133,7 +187,7 @@ class MessageParser:
 
             if telemetry.HasField('device_metrics'):
                 dm = telemetry.device_metrics
-                return DeviceTelemetry(
+                device_telem = DeviceTelemetry(
                     battery_level=dm.battery_level if dm.battery_level else None,
                     voltage=dm.voltage if dm.voltage else None,
                     channel_utilization=dm.channel_utilization if dm.channel_utilization else None,
@@ -141,9 +195,22 @@ class MessageParser:
                     uptime_seconds=dm.uptime_seconds if dm.uptime_seconds else None
                 )
 
+                # Add to node database if available
+                if self.node_db is not None and from_node_hex:
+                    self.node_db.add_device_metrics(
+                        node_id=from_node_hex,
+                        battery_level=device_telem.battery_level,
+                        voltage=device_telem.voltage,
+                        channel_utilization=device_telem.channel_utilization,
+                        air_util_tx=device_telem.air_util_tx,
+                        uptime_seconds=device_telem.uptime_seconds
+                    )
+
+                return device_telem
+
             if telemetry.HasField('environment_metrics'):
                 em = telemetry.environment_metrics
-                return EnvironmentTelemetry(
+                env_telem = EnvironmentTelemetry(
                     temperature=em.temperature if em.temperature else None,
                     relative_humidity=em.relative_humidity if em.relative_humidity else None,
                     barometric_pressure=em.barometric_pressure if em.barometric_pressure else None,
@@ -167,6 +234,22 @@ class MessageParser:
                     soil_moisture=em.soil_moisture if em.soil_moisture else None,
                     soil_temperature=em.soil_temperature if em.soil_temperature else None
                 )
+
+                # Add to node database if available
+                if self.node_db is not None and from_node_hex:
+                    metrics = {}
+                    fields = ['temperature', 'relative_humidity', 'barometric_pressure', 'gas_resistance',
+                             'voltage', 'current', 'iaq', 'distance', 'lux', 'white_lux', 'ir_lux', 'uv_lux',
+                             'wind_direction', 'wind_speed', 'weight', 'wind_gust', 'wind_lull', 'radiation',
+                             'rainfall_1h', 'rainfall_24h', 'soil_moisture', 'soil_temperature']
+                    for field in fields:
+                        value = getattr(env_telem, field, None)
+                        if value is not None:
+                            metrics[field] = value
+
+                    self.node_db.add_environment_metrics(node_id=from_node_hex, **metrics)
+
+                return env_telem
 
             return None
         except Exception:
@@ -215,8 +298,7 @@ class MessageParser:
         except Exception:
             return None
 
-    @staticmethod
-    def _parse_map_report(payload: bytes) -> Optional[MapReport]:
+    def _parse_map_report(self, payload: bytes, from_node_hex: str = None) -> Optional[MapReport]:
         """Parse map report payload."""
         try:
             map_report = mqtt_pb2.MapReport()
@@ -235,6 +317,14 @@ class MessageParser:
                     modem_preset_name = config_pb2.Config.LoRaConfig.ModemPreset.Name(map_report.modem_preset)
                 except Exception:
                     pass
+
+            # Update node database with MAP_REPORT data if available
+            if self.node_db and from_node_hex:
+                self.node_db.add_node(
+                    node_id=from_node_hex,
+                    long_name=map_report.long_name if map_report.long_name else None,
+                    short_name=map_report.short_name if map_report.short_name else None
+                )
 
             return MapReport(
                 long_name=map_report.long_name,
@@ -262,6 +352,15 @@ class MessageParser:
         timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         packet_info = self.parse_packet_info(packet)
 
+        # Track all nodes we see (from and to)
+        if self.node_db is not None:
+            # Add sender node (always track)
+            self.node_db.add_node(packet_info.from_node_hex)
+
+            # Add receiver node if not broadcast
+            if packet_info.to_node != 0xffffffff:
+                self.node_db.add_node(packet_info.to_node_hex)
+
         encrypted_payload_b64 = None
         if packet.HasField('encrypted'):
             encrypted_payload_b64 = base64.b64encode(bytes(packet.encrypted)).decode('utf-8')
@@ -276,8 +375,11 @@ class MessageParser:
 
         if data:
             portnum = data.portnum
-            portnum_name = portnums_pb2.PortNum.Name(portnum)
-            content = self.parse_message_content(portnum, data.payload)
+            try:
+                portnum_name = portnums_pb2.PortNum.Name(portnum)
+            except ValueError:
+                portnum_name = f"UNKNOWN_{portnum}"
+            content = self.parse_message_content(portnum, data.payload, packet_info.from_node_hex, packet_info.to_node_hex)
 
         return ParsedMessage(
             timestamp=timestamp,

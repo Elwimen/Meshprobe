@@ -46,7 +46,6 @@ def main():
 
     listen_parser = subparsers.add_parser('listen', help='Listen for incoming messages on MQTT')
     listen_parser.add_argument('--duration', type=int, default=0, help='Duration in seconds (0 = forever)')
-    listen_parser.add_argument('--log-file', default='mqtt_messages.json', help='File to log messages to')
     listen_parser.add_argument('--openssl-password', type=str, help='Password to decrypt OpenSSL-encrypted messages')
 
     subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
@@ -73,10 +72,9 @@ def main():
         server_config.root_topic = args.root_topic
         print(f"Overriding root topic to: {args.root_topic}")
 
-    log_file = args.log_file if args.command == 'listen' and hasattr(args, 'log_file') else 'mqtt_messages.json'
     openssl_password = args.openssl_password if args.command == 'listen' and hasattr(args, 'openssl_password') else None
 
-    client = MeshtasticMQTTClient(server_config, node_config, log_file, openssl_password)
+    client = MeshtasticMQTTClient(server_config, node_config, openssl_password)
 
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')
@@ -106,7 +104,7 @@ def main():
             time.sleep(1)
         elif args.command == 'listen':
             print("Listening for messages...")
-            print(f"Logging messages to: {client.logger.log_file}")
+            print(f"Logging node data to: nodes/")
             if args.duration > 0:
                 print(f"Will listen for {args.duration} seconds")
                 time.sleep(args.duration)
@@ -117,7 +115,7 @@ def main():
                         time.sleep(1)
                 except KeyboardInterrupt:
                     print("\nStopping...")
-                    print(f"Logged {client.logger.get_message_count()} messages to {client.logger.log_file}")
+                    print(f"Node data saved to: nodes/")
                     client.print_stats()
 
     finally:

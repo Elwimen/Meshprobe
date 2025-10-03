@@ -18,19 +18,22 @@ from .models import (
     NeighborInfo, MapReport, Statistics
 )
 from .crypto import CryptoEngine
+from .node_db import NodeDatabase
 
 
 class MessageFormatter:
     """Formatter for console output of Meshtastic messages."""
 
-    def __init__(self, crypto_engine: Optional[CryptoEngine] = None):
+    def __init__(self, crypto_engine: Optional[CryptoEngine] = None, node_db: Optional[NodeDatabase] = None):
         """
         Initialize MessageFormatter.
 
         Args:
             crypto_engine: Optional CryptoEngine for decrypting OpenSSL messages
+            node_db: Optional NodeDatabase for displaying node names
         """
         self.crypto_engine = crypto_engine
+        self.node_db = node_db
 
     def format_message(self, parsed_msg: ParsedMessage) -> str:
         """
@@ -50,7 +53,18 @@ class MessageFormatter:
         lines.append(f"Received at: {receive_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
         lines.append(f"Topic: {parsed_msg.topic}")
-        lines.append(f"From: {parsed_msg.packet_info.from_node_hex} → To: {parsed_msg.packet_info.to_node_hex}")
+
+        # Format From/To with node names if available
+        from_display = parsed_msg.packet_info.from_node_hex
+        to_display = parsed_msg.packet_info.to_node_hex
+
+        if self.node_db is not None:
+            from_name = self.node_db.get_display_name(parsed_msg.packet_info.from_node_hex)
+            to_name = self.node_db.get_display_name(parsed_msg.packet_info.to_node_hex)
+            from_display += from_name
+            to_display += to_name
+
+        lines.append(f"From: {from_display} → To: {to_display}")
         lines.append(f"Gateway: {parsed_msg.gateway_id}, Channel: {parsed_msg.channel_id}")
 
         if parsed_msg.packet_info.hops_away > 0:

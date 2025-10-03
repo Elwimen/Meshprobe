@@ -17,9 +17,9 @@ from .config import ServerConfig, NodeConfig
 from .crypto import CryptoEngine
 from .parsers import MessageParser
 from .formatters import MessageFormatter
-from .logger import MessageLogger
 from .publishers import MessagePublisher
 from .models import Statistics
+from .node_db import NodeDatabase
 
 
 class MeshtasticMQTTClient:
@@ -29,14 +29,13 @@ class MeshtasticMQTTClient:
     """
 
     def __init__(self, server_config: ServerConfig, node_config: NodeConfig,
-                 log_file: str = "mqtt_messages.json", openssl_password: Optional[str] = None):
+                 openssl_password: Optional[str] = None):
         """
         Initialize MeshtasticMQTTClient.
 
         Args:
             server_config: Server configuration
             node_config: Node configuration
-            log_file: Path to message log file
             openssl_password: Optional password for OpenSSL-encrypted messages
         """
         self.server_config = server_config
@@ -45,11 +44,11 @@ class MeshtasticMQTTClient:
         self.connected = False
         self.subscribe_mode = False
 
+        self.node_db = NodeDatabase()
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
         self.crypto = CryptoEngine(channel_keys, openssl_password)
-        self.parser = MessageParser()
-        self.formatter = MessageFormatter(self.crypto)
-        self.logger = MessageLogger(log_file)
+        self.parser = MessageParser(self.node_db)
+        self.formatter = MessageFormatter(self.crypto, self.node_db)
         self.stats = Statistics()
 
         self.publisher: Optional[MessagePublisher] = None
@@ -156,8 +155,6 @@ class MeshtasticMQTTClient:
                 return
 
         parsed_msg = self.parser.create_parsed_message(msg, service_envelope, packet, data)
-
-        self.logger.log_message(parsed_msg)
 
         if data:
             portnum_name = portnums_pb2.PortNum.Name(data.portnum)

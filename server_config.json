@@ -3,5 +3,5 @@
     "port": 1883,
     "username": "meshdev",
     "password": "large4cats",
-    "root_topic": "msh/EU_868"
+    "root_topic": "msh/EU_868/9A"
 }
