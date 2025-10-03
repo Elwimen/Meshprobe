@@ -150,6 +150,53 @@ class NodeDatabase:
 
         self._save_node(node_id)
 
+    def add_encrypted_packet(self, node_id: str, encrypted_data: bytes,
+                           from_node: str = None, to_node: str = None,
+                           packet_id: int = None, channel_id: str = None):
+        """
+        Add encrypted packet that failed to decrypt.
+
+        Args:
+            node_id: Node ID to associate packet with
+            encrypted_data: Raw encrypted bytes
+            from_node: Sender node ID
+            to_node: Recipient node ID
+            packet_id: Packet ID
+            channel_id: Channel ID/name
+        """
+        if node_id not in self.nodes:
+            self.add_node(node_id)
+
+        node = self.nodes[node_id]
+
+        if 'encrypted_packets' not in node:
+            node['encrypted_packets'] = []
+
+        import base64
+        packet_entry = {
+            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'encrypted_payload': base64.b64encode(encrypted_data).decode('ascii'),
+            'payload_size': len(encrypted_data)
+        }
+
+        if from_node:
+            packet_entry['from'] = from_node
+        if to_node:
+            packet_entry['to'] = to_node
+        if packet_id is not None:
+            packet_entry['packet_id'] = f"0x{packet_id:08x}"
+        if channel_id:
+            packet_entry['channel'] = channel_id
+
+        node['encrypted_packets'].append(packet_entry)
+        node['last_seen'] = packet_entry['timestamp']
+
+        # Keep last 100 encrypted packets
+        if len(node['encrypted_packets']) > 100:
+            node['encrypted_packets'] = node['encrypted_packets'][-100:]
+
+        self._save_node(node_id)
+
     def add_position(self, node_id: str, latitude: float, longitude: float,
                      altitude: int, timestamp: int = None):
         """
