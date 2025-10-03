@@ -19,6 +19,36 @@ from meshtastic_mqtt.config import ServerConfig, NodeConfig, ClientConfig, creat
 from meshtastic_mqtt.logging_config import setup_logging
 
 
+def root_topic_completer(prefix, parsed_args, **kwargs):
+    """Custom completer for --root-topic with region suggestions."""
+    # All known Meshtastic regions
+    regions = [
+        'msh/US',           # United States
+        'msh/EU_433',       # Europe 433MHz
+        'msh/EU_868',       # Europe 868MHz
+        'msh/UA_433',       # Ukraine 433MHz
+        'msh/UA_868',       # Ukraine 868MHz
+        'msh/CN',           # China
+        'msh/JP',           # Japan
+        'msh/KR',           # Korea
+        'msh/TW',           # Taiwan
+        'msh/IN',           # India
+        'msh/TH',           # Thailand
+        'msh/ANZ',          # Australia/New Zealand
+        'msh/NZ_865',       # New Zealand 865MHz
+        'msh/SG_923',       # Singapore
+        'msh/MY_433',       # Malaysia 433MHz
+        'msh/MY_919',       # Malaysia 919MHz
+        'msh/PH_433',       # Philippines 433MHz
+        'msh/PH_868',       # Philippines 868MHz
+        'msh/PH_915',       # Philippines 915MHz
+        'msh/RU',           # Russia
+        'msh/LORA_24',      # 2.4GHz LoRa
+        'msh',              # Root topic (all regions if allowed)
+    ]
+    return [r for r in regions if r.startswith(prefix)]
+
+
 def filter_completer(prefix, parsed_args, **kwargs):
     """Custom completer for comma-separated filter types."""
     valid_types = ['text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'encrypted', 'ascii']
@@ -49,8 +79,10 @@ def main():
                        help='Path to server configuration file')
     parser.add_argument('--node-config', default='node_config.json',
                        help='Path to node configuration file')
-    parser.add_argument('--root-topic', type=str,
-                       help='Override MQTT root topic (e.g., msh, msh/EU_868/HR)')
+    root_topic_arg = parser.add_argument('--root-topic', type=str,
+                       help='Override MQTT root topic (e.g., msh/US, msh/EU_868)')
+    if ARGCOMPLETE_AVAILABLE:
+        root_topic_arg.completer = root_topic_completer
     parser.add_argument('--create-configs', action='store_true',
                        help='Create default configuration files')
     parser.add_argument('--log-level', default='CRITICAL',
