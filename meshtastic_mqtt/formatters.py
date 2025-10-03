@@ -318,8 +318,24 @@ class MessageFormatter:
         if stats.portnum_counts:
             lines.append("")
             lines.append("Messages by PortNum:")
+
+            # Calculate bar graph parameters
+            max_count = max(count for _, count in stats.get_sorted_portnums())
+            name_width = 20
+            count_width = 5
+            percent_width = 4  # "45%"
+            bar_width = SEPARATOR_WIDTH - name_width - count_width - percent_width - 5  # 5 for spaces
+
             for portnum_name, count in stats.get_sorted_portnums():
-                lines.append(f"  {portnum_name:25s} {count:5d}")
+                # Shorten portnum name if needed
+                display_name = portnum_name[:name_width]
+
+                # Calculate percentage and bar length
+                percentage = (count / stats.total_messages * 100) if stats.total_messages > 0 else 0
+                bar_len = int((count / max_count) * bar_width) if max_count > 0 else 0
+                bar = '▓' * bar_len
+
+                lines.append(f"  {display_name:20s} {count:5d} {bar:<{bar_width}s} {percentage:3.0f}%")
 
         lines.append("=" * SEPARATOR_WIDTH)
         return "\n".join(lines)
