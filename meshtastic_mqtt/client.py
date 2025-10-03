@@ -32,7 +32,7 @@ class MeshtasticMQTTClient:
     """
 
     def __init__(self, server_config: ServerConfig, node_config: NodeConfig,
-                 openssl_password: Optional[str] = None, show_hex_dump: bool = False,
+                 openssl_password: Optional[str] = None, hex_dump: Optional[str] = None,
                  hex_dump_colored: bool = False):
         """
         Initialize MeshtasticMQTTClient.
@@ -41,7 +41,7 @@ class MeshtasticMQTTClient:
             server_config: Server configuration
             node_config: Node configuration
             openssl_password: Optional password for OpenSSL-encrypted messages
-            show_hex_dump: Show hex/ASCII dump for encrypted data
+            hex_dump: Hex dump mode: 'encrypted', 'decrypted', or 'all' (None = disabled)
             hex_dump_colored: Use colored output in hex dump
         """
         self.server_config = server_config
@@ -54,7 +54,7 @@ class MeshtasticMQTTClient:
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
         self.crypto = CryptoEngine(channel_keys, openssl_password)
         self.parser = MessageParser(self.node_db)
-        self.formatter = MessageFormatter(self.crypto, self.node_db, show_hex_dump, hex_dump_colored)
+        self.formatter = MessageFormatter(self.crypto, self.node_db, hex_dump, hex_dump_colored)
         self.stats = Statistics()
 
         self.publisher: Optional[MessagePublisher] = None
@@ -82,8 +82,8 @@ class MeshtasticMQTTClient:
         self.stats.total_messages += 1
         logger.debug(f"Received message: topic={msg.topic}, payload_len={len(msg.payload)}")
 
-        if '/json/' in msg.topic:
-            logger.debug("Skipping JSON topic")
+        if self._is_json_payload(msg.payload):
+            logger.debug("Skipping JSON payload")
             return
 
         if self._try_handle_direct_map_report(msg):
@@ -91,6 +91,21 @@ class MeshtasticMQTTClient:
             return
 
         self._handle_service_envelope(msg)
+
+    @staticmethod
+    def _is_json_payload(payload: bytes) -> bool:
+        """Check if payload is JSON by examining first non-whitespace character."""
+        if not payload:
+            return False
+
+        # Skip leading whitespace
+        for byte in payload:
+            if byte in (0x20, 0x09, 0x0A, 0x0D):  # space, tab, LF, CR
+                continue
+            # JSON must start with { or [
+            return byte in (0x7B, 0x5B)  # { or [
+
+        return False
 
     def _try_handle_direct_map_report(self, msg) -> bool:
         """Try to handle direct MAP REPORT messages on /map/ topics."""

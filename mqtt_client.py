@@ -53,7 +53,8 @@ def main():
     listen_parser = subparsers.add_parser('listen', help='Listen for incoming messages on MQTT')
     listen_parser.add_argument('--duration', type=int, default=0, help='Duration in seconds (0 = forever)')
     listen_parser.add_argument('--openssl-password', type=str, help='Password to decrypt OpenSSL-encrypted messages')
-    listen_parser.add_argument('--hex-dump', action='store_true', help='Show hex/ASCII dump for encrypted data')
+    listen_parser.add_argument('--hex-dump', choices=['encrypted', 'decrypted', 'all'],
+                               help='Show hex/ASCII dump: encrypted=failed decryption, decrypted=successfully decoded, all=both')
     listen_parser.add_argument('--colored', action='store_true', help='Use colored output in hex dump')
 
     subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
@@ -91,10 +92,10 @@ def main():
         print(f"Overriding root topic to: {args.root_topic}")
 
     openssl_password = args.openssl_password if args.command == 'listen' and hasattr(args, 'openssl_password') else None
-    show_hex_dump = args.hex_dump if args.command == 'listen' and hasattr(args, 'hex_dump') else False
+    hex_dump_mode = args.hex_dump if args.command == 'listen' and hasattr(args, 'hex_dump') else None
     hex_dump_colored = args.colored if args.command == 'listen' and hasattr(args, 'colored') else False
 
-    client = MeshtasticMQTTClient(server_config, node_config, openssl_password, show_hex_dump, hex_dump_colored)
+    client = MeshtasticMQTTClient(server_config, node_config, openssl_password, hex_dump_mode, hex_dump_colored)
 
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')

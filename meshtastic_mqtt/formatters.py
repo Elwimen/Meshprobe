@@ -26,19 +26,19 @@ class MessageFormatter:
     """Formatter for console output of Meshtastic messages."""
 
     def __init__(self, crypto_engine: Optional[CryptoEngine] = None, node_db: Optional[NodeDatabase] = None,
-                 show_hex_dump: bool = False, hex_dump_colored: bool = False):
+                 hex_dump: Optional[str] = None, hex_dump_colored: bool = False):
         """
         Initialize MessageFormatter.
 
         Args:
             crypto_engine: Optional CryptoEngine for decrypting OpenSSL messages
             node_db: Optional NodeDatabase for displaying node names
-            show_hex_dump: Show hex/ASCII dump for encrypted data
+            hex_dump: Hex dump mode: 'encrypted', 'decrypted', or 'all' (None = disabled)
             hex_dump_colored: Use colored output in hex dump
         """
         self.crypto_engine = crypto_engine
         self.node_db = node_db
-        self.show_hex_dump = show_hex_dump
+        self.hex_dump = hex_dump
         self.hex_dump_colored = hex_dump_colored
 
     def format_message(self, parsed_msg: ParsedMessage) -> str:
@@ -92,6 +92,14 @@ class MessageFormatter:
             lines.append(self._format_content(parsed_msg.content))
         else:
             lines.append("Unable to decode message")
+
+        # Show hex dump for decrypted payloads if enabled
+        if self.hex_dump in ('decrypted', 'all') and parsed_msg.decoded_payload_b64:
+            import base64
+            payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
+            lines.append("─" * 60)
+            lines.append(f"Raw payload ({len(payload_bytes)} bytes):")
+            lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
 
         lines.append("=" * 60)
         return "\n".join(lines)
@@ -321,7 +329,7 @@ class MessageFormatter:
         lines.append(f"Packet ID: {packet_info.packet_id_hex}")
         lines.append("─" * 60)
 
-        if self.show_hex_dump and encrypted_data:
+        if self.hex_dump in ('encrypted', 'all') and encrypted_data:
             lines.append(f"🔒 Encrypted payload ({len(encrypted_data)} bytes):")
             lines.append(hex_dump(encrypted_data, use_color=self.hex_dump_colored))
         else:
