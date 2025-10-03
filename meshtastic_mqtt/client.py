@@ -13,7 +13,7 @@ except ImportError as e:
     import sys
     sys.exit(1)
 
-from .config import ServerConfig, NodeConfig
+from .config import ServerConfig, NodeConfig, ClientConfig
 from .crypto import CryptoEngine
 from .parsers import MessageParser
 from .formatters import MessageFormatter
@@ -32,14 +32,16 @@ class MeshtasticMQTTClient:
     """
 
     def __init__(self, server_config: ServerConfig, node_config: NodeConfig,
-                 openssl_password: Optional[str] = None, hex_dump: Optional[str] = None,
-                 hex_dump_colored: bool = False, filter_types: Optional[dict] = None):
+                 client_config: ClientConfig, openssl_password: Optional[str] = None,
+                 hex_dump: Optional[str] = None, hex_dump_colored: bool = False,
+                 filter_types: Optional[dict] = None):
         """
         Initialize MeshtasticMQTTClient.
 
         Args:
             server_config: Server configuration
             node_config: Node configuration
+            client_config: Client configuration
             openssl_password: Optional password for OpenSSL-encrypted messages
             hex_dump: Hex dump mode: 'encrypted', 'decrypted', or 'all' (None = disabled)
             hex_dump_colored: Use colored output in hex dump
@@ -47,12 +49,16 @@ class MeshtasticMQTTClient:
         """
         self.server_config = server_config
         self.node_config = node_config
+        self.client_config = client_config
         self.client: Optional[mqtt.Client] = None
         self.connected = False
         self.subscribe_mode = False
         self.filter_types = filter_types
 
-        self.node_db = NodeDatabase()
+        self.node_db = NodeDatabase(
+            nodes_dir=client_config.nodes_dir,
+            flush_interval=client_config.node_db_flush_interval
+        )
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
         self.crypto = CryptoEngine(channel_keys, openssl_password)
         self.parser = MessageParser(self.node_db)
@@ -365,6 +371,9 @@ class MeshtasticMQTTClient:
             except Exception:
                 pass
             self.client.disconnect()
+
+        # Shutdown node database and flush pending writes
+        self.node_db.shutdown()
 
     def print_stats(self):
         """Print statistics summary."""

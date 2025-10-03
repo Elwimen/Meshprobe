@@ -5,7 +5,7 @@ A modular Python package for interacting with Meshtastic mesh networks via MQTT.
 """
 
 from .client import MeshtasticMQTTClient
-from .config import ServerConfig, NodeConfig, Position, DeviceMetrics, EnvironmentMetrics
+from .config import ServerConfig, NodeConfig, ClientConfig, Position, DeviceMetrics, EnvironmentMetrics
 from .crypto import CryptoEngine
 from .logger import MessageLogger
 from .formatters import MessageFormatter
@@ -17,6 +17,7 @@ __all__ = [
     'MeshtasticMQTTClient',
     'ServerConfig',
     'NodeConfig',
+    'ClientConfig',
     'Position',
     'DeviceMetrics',
     'EnvironmentMetrics',

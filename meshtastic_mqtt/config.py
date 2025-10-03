@@ -167,6 +167,27 @@ class NodeConfig:
 
 
 @dataclass
+class ClientConfig:
+    """Client configuration."""
+    node_db_flush_interval: int = 5  # seconds
+    nodes_dir: str = "nodes"
+
+    @classmethod
+    def from_json(cls, path: str | Path) -> 'ClientConfig':
+        """Load ClientConfig from JSON file."""
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            return cls(**{k: v for k, v in data.items() if not k.startswith('_')})
+        except FileNotFoundError:
+            # Return default config if file doesn't exist
+            return cls()
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in {path}: {e}")
+            sys.exit(1)
+
+
+@dataclass
 class ServerConfig:
     """MQTT server configuration."""
     host: str = "mqtt.meshtastic.org"
@@ -191,8 +212,15 @@ class ServerConfig:
 
 
 def create_default_configs(server_path: str = "server_config.json",
-                          node_path: str = "node_config.json") -> None:
+                          node_path: str = "node_config.json",
+                          client_path: str = "client_config.json") -> None:
     """Create default configuration files if they don't exist."""
+    client_config = {
+        "node_db_flush_interval": 5,
+        "_comment": "Flush interval in seconds for node database writes",
+        "nodes_dir": "nodes"
+    }
+
     server_config = {
         "host": "mqtt.meshtastic.org",
         "port": 1883,
@@ -247,8 +275,14 @@ def create_default_configs(server_path: str = "server_config.json",
         }
     }
 
+    client_path_obj = Path(client_path)
     server_path_obj = Path(server_path)
     node_path_obj = Path(node_path)
+
+    if not client_path_obj.exists():
+        with open(client_path_obj, 'w') as f:
+            json.dump(client_config, f, indent=2)
+        print(f"Created default client config: {client_path}")
 
     if not server_path_obj.exists():
         with open(server_path_obj, 'w') as f:

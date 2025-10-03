@@ -15,7 +15,7 @@ except ImportError:
     ARGCOMPLETE_AVAILABLE = False
 
 from meshtastic_mqtt import MeshtasticMQTTClient
-from meshtastic_mqtt.config import ServerConfig, NodeConfig, create_default_configs
+from meshtastic_mqtt.config import ServerConfig, NodeConfig, ClientConfig, create_default_configs
 from meshtastic_mqtt.logging_config import setup_logging
 
 
@@ -43,6 +43,8 @@ def filter_completer(prefix, parsed_args, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description='Meshtastic MQTT Client')
+    parser.add_argument('--client-config', default='client_config.json',
+                       help='Path to client configuration file')
     parser.add_argument('--server-config', default='server_config.json',
                        help='Path to server configuration file')
     parser.add_argument('--node-config', default='node_config.json',
@@ -114,6 +116,7 @@ def main():
     use_color_logging = args.colored if args.command == 'listen' and hasattr(args, 'colored') else False
     setup_logging(args.log_level, module_levels, use_color_logging)
 
+    client_config = ClientConfig.from_json(args.client_config)
     server_config = ServerConfig.from_json(args.server_config)
     node_config = NodeConfig.from_json(args.node_config)
 
@@ -165,7 +168,7 @@ def main():
                 'exclude': exclude_types
             }
 
-    client = MeshtasticMQTTClient(server_config, node_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
+    client = MeshtasticMQTTClient(server_config, node_config, client_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
 
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')

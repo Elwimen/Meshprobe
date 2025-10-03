@@ -4,28 +4,37 @@ Each node is stored in a separate JSON file in nodes/ directory.
 """
 
 import json
+import threading
+import time
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 from datetime import datetime, timezone
 
 
 class NodeDatabase:
     """Node database with one JSON file per node."""
 
-    def __init__(self, nodes_dir: str = "nodes"):
+    def __init__(self, nodes_dir: str = "nodes", flush_interval: int = 5):
         """
         Initialize NodeDatabase.
 
         Args:
             nodes_dir: Directory to store node JSON files
+            flush_interval: Interval in seconds to flush dirty nodes to disk
         """
         self.nodes_dir = Path(nodes_dir)
         self.nodes: Dict[str, dict] = {}
+        self.dirty_nodes: Set[str] = set()
+        self.flush_interval = flush_interval
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._flush_thread = None
 
         # Create nodes directory if it doesn't exist
         self.nodes_dir.mkdir(exist_ok=True)
 
         self._load_all_nodes()
+        self._start_flush_thread()
 
     def _load_all_nodes(self):
         """Load all node files from nodes directory."""
@@ -44,9 +53,29 @@ class NodeDatabase:
         if self.nodes:
             print(f"Loaded {len(self.nodes)} nodes from {self.nodes_dir}")
 
+    def _start_flush_thread(self):
+        """Start background thread for periodic flushing."""
+        self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
+        self._flush_thread.start()
+
+    def _flush_loop(self):
+        """Background loop to flush dirty nodes periodically."""
+        while not self._stop_event.wait(self.flush_interval):
+            self.flush_dirty_nodes()
+
+    def _mark_dirty(self, node_id: str):
+        """
+        Mark a node as dirty (needs to be saved).
+
+        Args:
+            node_id: Node ID to mark as dirty
+        """
+        with self._lock:
+            self.dirty_nodes.add(node_id)
+
     def _save_node(self, node_id: str):
         """
-        Save a single node to its JSON file.
+        Save a single node to its JSON file immediately.
 
         Args:
             node_id: Node ID to save
@@ -63,6 +92,22 @@ class NodeDatabase:
                 json.dump(self.nodes[node_id], f, indent=2)
         except Exception as e:
             print(f"Error saving node {node_id}: {e}")
+
+    def flush_dirty_nodes(self):
+        """Flush all dirty nodes to disk."""
+        with self._lock:
+            dirty = list(self.dirty_nodes)
+            self.dirty_nodes.clear()
+
+        for node_id in dirty:
+            self._save_node(node_id)
+
+    def shutdown(self):
+        """Shutdown database and flush all pending writes."""
+        self._stop_event.set()
+        if self._flush_thread:
+            self._flush_thread.join(timeout=2.0)
+        self.flush_dirty_nodes()
 
     def add_node(self, node_id: str, long_name: str = None, short_name: str = None,
                  hw_model: int = None, macaddr: str = None):
@@ -106,7 +151,7 @@ class NodeDatabase:
 
         if changed:
             node['last_seen'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-            self._save_node(node_id)
+            self._mark_dirty(node_id)
 
     def add_message(self, node_id: str, text: str, direction: str = 'received',
                    encrypted: bool = False, from_node: str = None, to_node: str = None):
@@ -148,7 +193,7 @@ class NodeDatabase:
         if len(node['messages']) > 100:
             node['messages'] = node['messages'][-100:]
 
-        self._save_node(node_id)
+        self._mark_dirty(node_id)
 
     def add_encrypted_packet(self, node_id: str, encrypted_data: bytes,
                            from_node: str = None, to_node: str = None,
@@ -195,7 +240,7 @@ class NodeDatabase:
         if len(node['encrypted_packets']) > 100:
             node['encrypted_packets'] = node['encrypted_packets'][-100:]
 
-        self._save_node(node_id)
+        self._mark_dirty(node_id)
 
     def add_position(self, node_id: str, latitude: float, longitude: float,
                      altitude: int, timestamp: int = None):
@@ -235,7 +280,7 @@ class NodeDatabase:
         if len(node['position_history']) > 100:
             node['position_history'] = node['position_history'][-100:]
 
-        self._save_node(node_id)
+        self._mark_dirty(node_id)
 
     def add_device_metrics(self, node_id: str, battery_level: float = None,
                           voltage: float = None, channel_utilization: float = None,
@@ -282,7 +327,7 @@ class NodeDatabase:
         if len(node['device_metrics_history']) > 100:
             node['device_metrics_history'] = node['device_metrics_history'][-100:]
 
-        self._save_node(node_id)
+        self._mark_dirty(node_id)
 
     def add_environment_metrics(self, node_id: str, **metrics):
         """
@@ -313,7 +358,7 @@ class NodeDatabase:
         if len(node['environment_metrics_history']) > 100:
             node['environment_metrics_history'] = node['environment_metrics_history'][-100:]
 
-        self._save_node(node_id)
+        self._mark_dirty(node_id)
 
     def get_node(self, node_id: str) -> Optional[dict]:
         """
