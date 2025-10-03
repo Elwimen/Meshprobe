@@ -40,7 +40,7 @@ class MessagePublisher:
     def publish_map_position(self) -> bool:
         """Publish position to the mesh map using protobuf MapReport."""
         root = self.server_config.root_topic
-        topic = f"{root}/2/map/"
+        topic = f"{root}/2/map"
 
         base_lat = self.node_config.position.latitude
         base_lon = self.node_config.position.longitude
@@ -94,20 +94,20 @@ class MessagePublisher:
     def send_text_message(self, text: str, to_node_id: str, channel: int = 0, hop_limit: int = 3) -> bool:
         """Send a text message to a specific node."""
         to_node_num = parse_node_id(to_node_id)
+        channel_name = self.node_config.get_channel_name(channel)
         channel_hash = self._get_channel_hash(channel)
 
         mesh_packet = self._create_text_mesh_packet(text, to_node_num, channel_hash, hop_limit)
-        service_envelope = self._create_service_envelope(mesh_packet)
+        service_envelope = self._create_service_envelope(mesh_packet, channel_name)
 
-        return self._publish_message(service_envelope, to_node_num, "text message", {"Message": text})
+        return self._publish_message(service_envelope, to_node_num, "text message", {"Message": text, "Channel": channel_name})
 
     def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3) -> bool:
         """Send position to a specific node."""
         to_node_num = parse_node_id(to_node_id)
-        channel_hash = self._get_channel_hash(channel)
 
         position = self._create_position()
-        mesh_packet = self._create_position_mesh_packet(position, to_node_num, channel_hash, hop_limit)
+        mesh_packet = self._create_position_mesh_packet(position, to_node_num, 0, hop_limit)
         service_envelope = self._create_service_envelope(mesh_packet)
 
         details = {"Position": f"{self.node_config.position.latitude}, {self.node_config.position.longitude}"}
@@ -224,14 +224,15 @@ class MessagePublisher:
             payload=position.SerializeToString(),
             channel_hash=channel_hash,
             hop_limit=hop_limit,
-            want_ack=False
+            want_ack=False,
+            add_rx_time=True
         )
 
-    def _create_service_envelope(self, mesh_packet: mesh_pb2.MeshPacket) -> mqtt_pb2.ServiceEnvelope:
+    def _create_service_envelope(self, mesh_packet: mesh_pb2.MeshPacket, channel_name: str = None) -> mqtt_pb2.ServiceEnvelope:
         """Create ServiceEnvelope wrapping MeshPacket."""
         service_envelope = mqtt_pb2.ServiceEnvelope()
         service_envelope.packet.CopyFrom(mesh_packet)
-        service_envelope.channel_id = self.node_config.channel
+        service_envelope.channel_id = channel_name or self.node_config.channel
         service_envelope.gateway_id = self.node_config.node_id
         return service_envelope
 
@@ -266,6 +267,8 @@ class MessagePublisher:
         telemetry.device_metrics.voltage = float(self.node_config.device_metrics.voltage)
         telemetry.device_metrics.channel_utilization = float(self.node_config.device_metrics.channel_utilization)
         telemetry.device_metrics.air_util_tx = float(self.node_config.device_metrics.air_util_tx)
+        if self.node_config.device_metrics.uptime_seconds:
+            telemetry.device_metrics.uptime_seconds = int(self.node_config.device_metrics.uptime_seconds)
 
         mesh_packet = self._create_base_mesh_packet(
             to_node=0xFFFFFFFF,
@@ -375,7 +378,7 @@ class MessagePublisher:
                                 lat: float, lon: float, alt: float, region: int, modem_preset: int, payload_size: int):
         """Print information about map position publish."""
         root = self.server_config.root_topic
-        topic = f"{root}/2/map/"
+        topic = f"{root}/2/map"
 
         print(f"Publishing map report to topic: {topic}")
         print(f"Node: {self.node_config.long_name} ({self.node_config.node_id})")

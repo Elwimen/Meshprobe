@@ -80,6 +80,7 @@ class NodeConfig:
     modem_preset: str = "LONG_FAST"
     has_default_channel: bool = True
     channels: dict = field(default_factory=dict)
+    channel_map: dict = field(default_factory=dict)  # Maps channel index to name
 
     def __post_init__(self):
         """Calculate node_num from node_id if it starts with !"""
@@ -100,6 +101,18 @@ class NodeConfig:
             env_data = {k: v for k, v in self.environment_metrics.items() if not k.startswith('_')}
             self.environment_metrics = EnvironmentMetrics(**env_data)
 
+    def get_channel_name(self, channel_index: int) -> str:
+        """
+        Get channel name from channel index.
+
+        Args:
+            channel_index: Channel index (0-based)
+
+        Returns:
+            Channel name, or default channel if not found
+        """
+        return self.channel_map.get(str(channel_index), self.channel)
+
     @classmethod
     def from_json(cls, path: str | Path) -> 'NodeConfig':
         """Load NodeConfig from JSON file."""
@@ -118,6 +131,16 @@ class NodeConfig:
             region = _extract_value(data, 'region', 'UNSET')
             modem_preset = _extract_value(data, 'modem_preset', 'LONG_FAST')
 
+            # Parse channel_map if available
+            channel_map = {}
+            channels_data = data.get('channels', {})
+            for key, value in channels_data.items():
+                # Support both old format {"LongFast": {"psk": "..."}}
+                # and new format {"0": {"name": "LongFast", "psk": "..."}}
+                if key.isdigit():
+                    if isinstance(value, dict) and 'name' in value:
+                        channel_map[key] = value['name']
+
             return cls(
                 node_id=node_id,
                 long_name=data.get('long_name', 'Simulated Node'),
@@ -132,7 +155,8 @@ class NodeConfig:
                 region=region,
                 modem_preset=modem_preset,
                 has_default_channel=data.get('has_default_channel', True),
-                channels=data.get('channels', {}),
+                channels=channels_data,
+                channel_map=channel_map,
             )
         except FileNotFoundError:
             print(f"Error: Config file not found: {path}")

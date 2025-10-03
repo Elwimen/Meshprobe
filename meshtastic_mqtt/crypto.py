@@ -24,6 +24,10 @@ except ImportError:
     import sys
     sys.exit(1)
 
+from .logging_config import get_logger
+
+logger = get_logger('crypto')
+
 
 class CryptoEngine:
     """Handles encryption and decryption for Meshtastic messages."""
@@ -53,6 +57,9 @@ class CryptoEngine:
     def load_channel_keys(channels: dict) -> dict[str, bytes]:
         """
         Load channel PSKs from configuration.
+        Supports both formats:
+        - Old: {"LongFast": {"psk": "AQ=="}}
+        - New: {"0": {"name": "LongFast", "psk": "AQ=="}}
 
         Args:
             channels: Dictionary of channel configurations
@@ -64,23 +71,38 @@ class CryptoEngine:
             return {"default": CryptoEngine.DEFAULT_PSK}
 
         keys = {}
-        for channel_name, channel_config in channels.items():
+        for key, channel_config in channels.items():
+            if not isinstance(channel_config, dict):
+                continue
+
             psk_b64 = channel_config.get('psk')
-            if psk_b64:
+            if not psk_b64:
+                continue
+
+            # New format with index: {"0": {"name": "LongFast", "psk": "..."}}
+            if key.isdigit() and 'name' in channel_config:
+                channel_name = channel_config['name']
                 keys[channel_name] = base64.b64decode(psk_b64)
+                logger.debug(f"Loaded channel {key} -> '{channel_name}'")
+            # Old format: {"LongFast": {"psk": "..."}}
             else:
-                keys[channel_name] = CryptoEngine.DEFAULT_PSK
+                keys[key] = base64.b64decode(psk_b64)
+                logger.debug(f"Loaded channel '{key}'")
+
+        if not keys:
+            keys["default"] = CryptoEngine.DEFAULT_PSK
 
         return keys
 
     def decrypt_packet(self, packet, channel_id: str, debug: bool = False) -> Optional[mesh_pb2.Data]:
         """
         Decrypt an encrypted Meshtastic packet using AES-CTR.
+        Tries the specified channel key first, then all other keys if that fails.
 
         Args:
             packet: MeshPacket protobuf with encrypted field
             channel_id: Channel ID to determine PSK
-            debug: Enable debug output
+            debug: Enable debug output (deprecated, use logging instead)
 
         Returns:
             Decrypted Data protobuf or None if decryption fails
@@ -88,33 +110,60 @@ class CryptoEngine:
         if not packet.HasField('encrypted'):
             return None
 
-        key = self.channel_keys.get(channel_id) or self.channel_keys.get('default')
-        if not key:
-            return None
+        logger.debug(f"Attempting to decrypt packet for channel '{channel_id}'")
 
+        # Try specified channel key first
+        key = self.channel_keys.get(channel_id) or self.channel_keys.get('default')
+        if key:
+            logger.debug(f"Trying primary key for channel '{channel_id}'")
+            result = self._try_decrypt_with_key(packet, key, channel_id)
+            if result:
+                logger.debug(f"Successfully decrypted with channel '{channel_id}' key")
+                return result
+
+        # Try all other keys
+        logger.debug(f"Primary key failed, trying all {len(self.channel_keys)} available keys")
+        for name, other_key in self.channel_keys.items():
+            if name == channel_id or (channel_id not in self.channel_keys and name == 'default'):
+                continue  # Already tried this key
+
+            logger.debug(f"Trying alternate key '{name}'")
+            result = self._try_decrypt_with_key(packet, other_key, name)
+            if result:
+                logger.info(f"Successfully decrypted with '{name}' key (expected '{channel_id}')")
+                return result
+
+        logger.debug(f"Failed to decrypt with any of {len(self.channel_keys)} available keys")
+        return None
+
+    def _try_decrypt_with_key(self, packet, key: bytes, key_name: str) -> Optional[mesh_pb2.Data]:
+        """
+        Try to decrypt packet with a specific key.
+
+        Args:
+            packet: MeshPacket protobuf with encrypted field
+            key: PSK to try
+            key_name: Name of the key (for debugging)
+
+        Returns:
+            Decrypted Data protobuf or None if decryption fails
+        """
         key = self._normalize_key_length(key)
         encrypted_data = bytes(packet.encrypted)
         nonce = self._build_nonce(packet.id, getattr(packet, 'from'))
 
-        if debug:
-            self._print_debug_info(packet, nonce, key, encrypted_data)
-
-        cipher = Cipher(algorithms.AES(key), modes.CTR(bytes(nonce)), backend=default_backend())
-        decryptor = cipher.decryptor()
-        decrypted = decryptor.update(encrypted_data) + decryptor.finalize()
-
-        if debug:
-            print(f"Debug: decrypted_len={len(decrypted)}")
-            print(f"Debug: decrypted_first_32={decrypted[:min(32, len(decrypted))].hex()}")
-
         try:
+            cipher = Cipher(algorithms.AES(key), modes.CTR(bytes(nonce)), backend=default_backend())
+            decryptor = cipher.decryptor()
+            decrypted = decryptor.update(encrypted_data) + decryptor.finalize()
+
+            logger.debug(f"Key '{key_name}': decrypted {len(decrypted)} bytes")
+
             data = mesh_pb2.Data()
             data.ParseFromString(decrypted)
             return data
         except Exception as e:
-            if debug:
-                print(f"Failed to parse decrypted data: {e}")
-                print(f"Full decrypted hex: {decrypted.hex()}")
+            logger.debug(f"Key '{key_name}' failed: {e}")
             return None
 
     @staticmethod
@@ -163,12 +212,15 @@ class CryptoEngine:
             Decrypted plaintext or None if decryption fails
         """
         if not self.openssl_password:
+            logger.debug("No OpenSSL password configured, skipping OpenSSL decryption")
             return None
 
         try:
+            logger.debug("Attempting OpenSSL decryption")
             data = base64.b64decode(ciphertext_b64)
 
             if not data.startswith(b'Salted__'):
+                logger.debug("Data does not have 'Salted__' header")
                 return None
 
             salt = data[8:16]
@@ -176,8 +228,10 @@ class CryptoEngine:
 
             try:
                 key, iv = self._derive_key_pbkdf2(salt)
+                logger.debug("Using PBKDF2 key derivation")
             except Exception:
                 key, iv = self._derive_key_md5(salt)
+                logger.debug("Using MD5 key derivation")
 
             cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
             decryptor = cipher.decryptor()
@@ -186,9 +240,11 @@ class CryptoEngine:
             padding_len = plaintext_padded[-1]
             plaintext = plaintext_padded[:-padding_len]
 
-            return plaintext.decode('utf-8', errors='replace')
+            result = plaintext.decode('utf-8', errors='replace')
+            logger.debug(f"OpenSSL decryption successful, {len(result)} chars")
+            return result
         except Exception as e:
-            print(f"   [OpenSSL decrypt failed: {e}]")
+            logger.debug(f"OpenSSL decrypt failed: {e}")
             return None
 
     def _derive_key_pbkdf2(self, salt: bytes) -> tuple[bytes, bytes]:

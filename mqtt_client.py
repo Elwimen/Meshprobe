@@ -16,6 +16,7 @@ except ImportError:
 
 from meshtastic_mqtt import MeshtasticMQTTClient
 from meshtastic_mqtt.config import ServerConfig, NodeConfig, create_default_configs
+from meshtastic_mqtt.logging_config import setup_logging
 
 
 def main():
@@ -28,6 +29,11 @@ def main():
                        help='Override MQTT root topic (e.g., msh, msh/EU_868/HR)')
     parser.add_argument('--create-configs', action='store_true',
                        help='Create default configuration files')
+    parser.add_argument('--log-level', default='WARNING',
+                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                       help='Set logging level')
+    parser.add_argument('--debug-modules', type=str,
+                       help='Comma-separated list of modules to debug (e.g., client,parsers)')
 
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
@@ -47,6 +53,8 @@ def main():
     listen_parser = subparsers.add_parser('listen', help='Listen for incoming messages on MQTT')
     listen_parser.add_argument('--duration', type=int, default=0, help='Duration in seconds (0 = forever)')
     listen_parser.add_argument('--openssl-password', type=str, help='Password to decrypt OpenSSL-encrypted messages')
+    listen_parser.add_argument('--hex-dump', action='store_true', help='Show hex/ASCII dump for encrypted data')
+    listen_parser.add_argument('--colored', action='store_true', help='Use colored output in hex dump')
 
     subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
     subparsers.add_parser('telemetry', help='Broadcast device TELEMETRY packet')
@@ -65,6 +73,16 @@ def main():
         parser.print_help()
         return
 
+    # Setup logging
+    module_levels = {}
+    if args.debug_modules:
+        for module in args.debug_modules.split(','):
+            module_levels[module.strip()] = 'DEBUG'
+
+    # Use colored logging if --colored flag is present (for listen command)
+    use_color_logging = args.colored if args.command == 'listen' and hasattr(args, 'colored') else False
+    setup_logging(args.log_level, module_levels, use_color_logging)
+
     server_config = ServerConfig.from_json(args.server_config)
     node_config = NodeConfig.from_json(args.node_config)
 
@@ -73,8 +91,10 @@ def main():
         print(f"Overriding root topic to: {args.root_topic}")
 
     openssl_password = args.openssl_password if args.command == 'listen' and hasattr(args, 'openssl_password') else None
+    show_hex_dump = args.hex_dump if args.command == 'listen' and hasattr(args, 'hex_dump') else False
+    hex_dump_colored = args.colored if args.command == 'listen' and hasattr(args, 'colored') else False
 
-    client = MeshtasticMQTTClient(server_config, node_config, openssl_password)
+    client = MeshtasticMQTTClient(server_config, node_config, openssl_password, show_hex_dump, hex_dump_colored)
 
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')

@@ -20,6 +20,9 @@ from .formatters import MessageFormatter
 from .publishers import MessagePublisher
 from .models import Statistics
 from .node_db import NodeDatabase
+from .logging_config import get_logger
+
+logger = get_logger('client')
 
 
 class MeshtasticMQTTClient:
@@ -29,7 +32,8 @@ class MeshtasticMQTTClient:
     """
 
     def __init__(self, server_config: ServerConfig, node_config: NodeConfig,
-                 openssl_password: Optional[str] = None):
+                 openssl_password: Optional[str] = None, show_hex_dump: bool = False,
+                 hex_dump_colored: bool = False):
         """
         Initialize MeshtasticMQTTClient.
 
@@ -37,6 +41,8 @@ class MeshtasticMQTTClient:
             server_config: Server configuration
             node_config: Node configuration
             openssl_password: Optional password for OpenSSL-encrypted messages
+            show_hex_dump: Show hex/ASCII dump for encrypted data
+            hex_dump_colored: Use colored output in hex dump
         """
         self.server_config = server_config
         self.node_config = node_config
@@ -48,7 +54,7 @@ class MeshtasticMQTTClient:
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
         self.crypto = CryptoEngine(channel_keys, openssl_password)
         self.parser = MessageParser(self.node_db)
-        self.formatter = MessageFormatter(self.crypto, self.node_db)
+        self.formatter = MessageFormatter(self.crypto, self.node_db, show_hex_dump, hex_dump_colored)
         self.stats = Statistics()
 
         self.publisher: Optional[MessagePublisher] = None
@@ -74,11 +80,14 @@ class MeshtasticMQTTClient:
     def on_message(self, client, userdata, msg):
         """Callback when message is received."""
         self.stats.total_messages += 1
+        logger.debug(f"Received message: topic={msg.topic}, payload_len={len(msg.payload)}")
 
         if '/json/' in msg.topic:
+            logger.debug("Skipping JSON topic")
             return
 
         if self._try_handle_direct_map_report(msg):
+            logger.debug("Handled as direct map report")
             return
 
         self._handle_service_envelope(msg)
@@ -130,16 +139,24 @@ class MeshtasticMQTTClient:
 
     def _handle_service_envelope(self, msg):
         """Handle ServiceEnvelope MQTT messages."""
+        logger.debug(f"Handling ServiceEnvelope on topic: {msg.topic}")
         try:
             service_envelope = mqtt_pb2.ServiceEnvelope()
             service_envelope.ParseFromString(msg.payload)
         except Exception:
-            print(f"Error parsing ServiceEnvelope on topic: {msg.topic}")
-            print(f"Payload length: {len(msg.payload)} bytes")
+            logger.error(f"Error parsing ServiceEnvelope on topic: {msg.topic}, payload length: {len(msg.payload)} bytes")
+            from .hex_dump import hex_dump
+            dump = hex_dump(msg.payload, use_color=self.formatter.hex_dump_colored)
+            logger.error(f"Payload dump:\n{dump}")
             return
 
         packet = service_envelope.packet
         channel_id = service_envelope.channel_id
+
+        logger.debug(f"Packet fields: decoded={packet.HasField('decoded')}, encrypted={packet.HasField('encrypted')}")
+        if packet.HasField('decoded'):
+            portnum_name = portnums_pb2.PortNum.Name(packet.decoded.portnum)
+            logger.debug(f"Decoded packet: portnum={packet.decoded.portnum} ({portnum_name})")
 
         data = None
         if packet.HasField('decoded'):
@@ -148,10 +165,24 @@ class MeshtasticMQTTClient:
             data = self.crypto.decrypt_packet(packet, channel_id, debug=False)
             if data:
                 self.stats.successful_decrypts += 1
+                logger.debug("Successfully decrypted packet")
             else:
                 self.stats.failed_decrypts += 1
+                logger.debug("Failed to decrypt packet")
                 packet_info = self.parser.parse_packet_info(packet)
-                print(f"\n{self.formatter.format_encrypted_failure(packet_info)}\n")
+                encrypted_data = bytes(packet.encrypted) if packet.HasField('encrypted') else None
+
+                # Store encrypted packet to node database
+                self.node_db.add_encrypted_packet(
+                    packet_info.from_node_hex,
+                    encrypted_data,
+                    from_node=packet_info.from_node_hex,
+                    to_node=packet_info.to_node_hex,
+                    packet_id=packet_info.packet_id,
+                    channel_id=channel_id
+                )
+
+                print(f"\n{self.formatter.format_encrypted_failure(packet_info, encrypted_data)}\n")
                 return
 
         parsed_msg = self.parser.create_parsed_message(msg, service_envelope, packet, data)
@@ -159,6 +190,7 @@ class MeshtasticMQTTClient:
         if data:
             portnum_name = portnums_pb2.PortNum.Name(data.portnum)
             self.stats.increment_portnum(portnum_name)
+            logger.info(f"Received {portnum_name} from {parsed_msg.packet_info.from_node_hex}")
 
         print(f"\n{self.formatter.format_message(parsed_msg)}\n")
 
