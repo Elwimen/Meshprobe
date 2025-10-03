@@ -150,7 +150,7 @@ class NodeDatabase:
             changed = True
 
         if changed:
-            node['last_seen'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            self._update_node_timestamp(node, self._get_timestamp())
             self._mark_dirty(node_id)
 
     def add_message(self, node_id: str, text: str, direction: str = 'received',
@@ -170,12 +170,10 @@ class NodeDatabase:
             self.add_node(node_id)
 
         node = self.nodes[node_id]
-
-        if 'messages' not in node:
-            node['messages'] = []
+        timestamp = self._get_timestamp()
 
         message_entry = {
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'timestamp': timestamp,
             'text': text,
             'direction': direction,
             'encrypted': encrypted
@@ -186,13 +184,8 @@ class NodeDatabase:
         if to_node:
             message_entry['to'] = to_node
 
-        node['messages'].append(message_entry)
-        node['last_seen'] = message_entry['timestamp']
-
-        # Keep last 100 messages
-        if len(node['messages']) > 100:
-            node['messages'] = node['messages'][-100:]
-
+        self._append_and_trim(node, 'messages', message_entry, max_size=100)
+        self._update_node_timestamp(node, timestamp)
         self._mark_dirty(node_id)
 
     def add_encrypted_packet(self, node_id: str, encrypted_data: bytes,
@@ -213,13 +206,11 @@ class NodeDatabase:
             self.add_node(node_id)
 
         node = self.nodes[node_id]
-
-        if 'encrypted_packets' not in node:
-            node['encrypted_packets'] = []
+        timestamp = self._get_timestamp()
 
         import base64
         packet_entry = {
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'timestamp': timestamp,
             'encrypted_payload': base64.b64encode(encrypted_data).decode('ascii'),
             'payload_size': len(encrypted_data)
         }
@@ -233,13 +224,8 @@ class NodeDatabase:
         if channel_id:
             packet_entry['channel'] = channel_id
 
-        node['encrypted_packets'].append(packet_entry)
-        node['last_seen'] = packet_entry['timestamp']
-
-        # Keep last 100 encrypted packets
-        if len(node['encrypted_packets']) > 100:
-            node['encrypted_packets'] = node['encrypted_packets'][-100:]
-
+        self._append_and_trim(node, 'encrypted_packets', packet_entry, max_size=100)
+        self._update_node_timestamp(node, timestamp)
         self._mark_dirty(node_id)
 
     def add_position(self, node_id: str, latitude: float, longitude: float,
@@ -258,12 +244,10 @@ class NodeDatabase:
             self.add_node(node_id)
 
         node = self.nodes[node_id]
-
-        if 'position_history' not in node:
-            node['position_history'] = []
+        ts = self._get_timestamp()
 
         position_entry = {
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'timestamp': ts,
             'latitude': latitude,
             'longitude': longitude,
             'altitude': altitude
@@ -272,14 +256,9 @@ class NodeDatabase:
         if timestamp:
             position_entry['position_timestamp'] = timestamp
 
-        node['position_history'].append(position_entry)
+        self._append_and_trim(node, 'position_history', position_entry, max_size=100)
         node['last_position'] = position_entry.copy()
-        node['last_seen'] = position_entry['timestamp']
-
-        # Keep last 100 positions
-        if len(node['position_history']) > 100:
-            node['position_history'] = node['position_history'][-100:]
-
+        self._update_node_timestamp(node, ts)
         self._mark_dirty(node_id)
 
     def add_device_metrics(self, node_id: str, battery_level: float = None,
@@ -300,13 +279,9 @@ class NodeDatabase:
             self.add_node(node_id)
 
         node = self.nodes[node_id]
+        ts = self._get_timestamp()
 
-        if 'device_metrics_history' not in node:
-            node['device_metrics_history'] = []
-
-        metrics = {
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        }
+        metrics = {'timestamp': ts}
 
         if battery_level is not None:
             metrics['battery_level'] = battery_level
@@ -319,14 +294,9 @@ class NodeDatabase:
         if uptime_seconds is not None:
             metrics['uptime_seconds'] = uptime_seconds
 
-        node['device_metrics_history'].append(metrics)
+        self._append_and_trim(node, 'device_metrics_history', metrics, max_size=100)
         node['last_device_metrics'] = metrics.copy()
-        node['last_seen'] = metrics['timestamp']
-
-        # Keep last 100 entries
-        if len(node['device_metrics_history']) > 100:
-            node['device_metrics_history'] = node['device_metrics_history'][-100:]
-
+        self._update_node_timestamp(node, ts)
         self._mark_dirty(node_id)
 
     def add_environment_metrics(self, node_id: str, **metrics):
@@ -341,23 +311,14 @@ class NodeDatabase:
             self.add_node(node_id)
 
         node = self.nodes[node_id]
+        ts = self._get_timestamp()
 
-        if 'environment_metrics_history' not in node:
-            node['environment_metrics_history'] = []
-
-        env_metrics = {
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        }
+        env_metrics = {'timestamp': ts}
         env_metrics.update(metrics)
 
-        node['environment_metrics_history'].append(env_metrics)
+        self._append_and_trim(node, 'environment_metrics_history', env_metrics, max_size=100)
         node['last_environment_metrics'] = env_metrics.copy()
-        node['last_seen'] = env_metrics['timestamp']
-
-        # Keep last 100 entries
-        if len(node['environment_metrics_history']) > 100:
-            node['environment_metrics_history'] = node['environment_metrics_history'][-100:]
-
+        self._update_node_timestamp(node, ts)
         self._mark_dirty(node_id)
 
     def get_node(self, node_id: str) -> Optional[dict]:
@@ -401,3 +362,36 @@ class NodeDatabase:
     def __len__(self):
         """Return number of nodes in database."""
         return len(self.nodes)
+
+    @staticmethod
+    def _get_timestamp() -> str:
+        """Get current UTC timestamp in ISO format."""
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+    def _append_and_trim(self, node: dict, field: str, entry: dict, max_size: int = 100):
+        """
+        Append entry to node's field list and trim to max_size.
+
+        Args:
+            node: Node dictionary
+            field: Field name (e.g., 'messages', 'position_history')
+            entry: Entry to append
+            max_size: Maximum list size
+        """
+        if field not in node:
+            node[field] = []
+
+        node[field].append(entry)
+
+        if len(node[field]) > max_size:
+            node[field] = node[field][-max_size:]
+
+    def _update_node_timestamp(self, node: dict, timestamp: str):
+        """
+        Update node's last_seen timestamp.
+
+        Args:
+            node: Node dictionary
+            timestamp: Timestamp string
+        """
+        node['last_seen'] = timestamp
