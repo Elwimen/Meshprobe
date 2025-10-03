@@ -19,21 +19,27 @@ from .models import (
 )
 from .crypto import CryptoEngine
 from .node_db import NodeDatabase
+from .hex_dump import hex_dump
 
 
 class MessageFormatter:
     """Formatter for console output of Meshtastic messages."""
 
-    def __init__(self, crypto_engine: Optional[CryptoEngine] = None, node_db: Optional[NodeDatabase] = None):
+    def __init__(self, crypto_engine: Optional[CryptoEngine] = None, node_db: Optional[NodeDatabase] = None,
+                 show_hex_dump: bool = False, hex_dump_colored: bool = False):
         """
         Initialize MessageFormatter.
 
         Args:
             crypto_engine: Optional CryptoEngine for decrypting OpenSSL messages
             node_db: Optional NodeDatabase for displaying node names
+            show_hex_dump: Show hex/ASCII dump for encrypted data
+            hex_dump_colored: Use colored output in hex dump
         """
         self.crypto_engine = crypto_engine
         self.node_db = node_db
+        self.show_hex_dump = show_hex_dump
+        self.hex_dump_colored = hex_dump_colored
 
     def format_message(self, parsed_msg: ParsedMessage) -> str:
         """
@@ -307,14 +313,19 @@ class MessageFormatter:
         lines.append("=" * 60)
         return "\n".join(lines)
 
-    @staticmethod
-    def format_encrypted_failure(packet_info) -> str:
+    def format_encrypted_failure(self, packet_info, encrypted_data: bytes = None) -> str:
         """Format message for failed decryption."""
         lines = []
         lines.append("=" * 60)
         lines.append(f"From: {packet_info.from_node_hex} → To: {packet_info.to_node_hex}")
         lines.append(f"Packet ID: {packet_info.packet_id_hex}")
         lines.append("─" * 60)
-        lines.append("🔒 ENCRYPTED (unable to decrypt)")
+
+        if self.show_hex_dump and encrypted_data:
+            lines.append(f"🔒 Encrypted payload ({len(encrypted_data)} bytes):")
+            lines.append(hex_dump(encrypted_data, use_color=self.hex_dump_colored))
+        else:
+            lines.append("🔒 ENCRYPTED (unable to decrypt)")
+
         lines.append("=" * 60)
         return "\n".join(lines)
