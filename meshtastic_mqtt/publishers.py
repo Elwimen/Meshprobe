@@ -17,6 +17,33 @@ from .config import NodeConfig, ServerConfig
 from .crypto import CryptoEngine
 from .utils import parse_node_id
 
+# Environment field configuration for send_environment
+# Format: (field_name, protobuf_type, unit, display_name)
+ENV_FIELD_CONFIG = [
+    ('temperature', float, '°C', 'Temp'),
+    ('relative_humidity', float, '%', 'Humidity'),
+    ('barometric_pressure', float, 'hPa', 'Pressure'),
+    ('gas_resistance', float, 'Ω', 'Gas'),
+    ('voltage', float, 'V', 'Volt'),
+    ('current', float, 'mA', 'Current'),
+    ('iaq', int, '', 'IAQ'),
+    ('distance', float, 'm', 'Distance'),
+    ('lux', float, '', 'Lux'),
+    ('white_lux', float, '', 'WhiteLux'),
+    ('ir_lux', float, '', 'IR'),
+    ('uv_lux', float, '', 'UV'),
+    ('wind_direction', int, '°', 'WindDir'),
+    ('wind_speed', float, 'm/s', 'WindSpeed'),
+    ('weight', float, 'kg', 'Weight'),
+    ('wind_gust', float, 'm/s', 'Gust'),
+    ('wind_lull', float, 'm/s', 'Lull'),
+    ('radiation', float, 'cpm', 'Radiation'),
+    ('rainfall_1h', float, 'mm', 'Rain1h'),
+    ('rainfall_24h', float, 'mm', 'Rain24h'),
+    ('soil_moisture', int, '%', 'SoilMoisture'),
+    ('soil_temperature', float, '°C', 'SoilTemp'),
+]
+
 
 class MessagePublisher:
     """Publishes messages to Meshtastic MQTT broker."""
@@ -293,72 +320,18 @@ class MessagePublisher:
         env = self.node_config.environment_metrics
         metrics = []
 
-        if env.temperature != 0.0:
-            telemetry.environment_metrics.temperature = float(env.temperature)
-            metrics.append(f"Temp {env.temperature}°C")
-        if env.relative_humidity != 0.0:
-            telemetry.environment_metrics.relative_humidity = float(env.relative_humidity)
-            metrics.append(f"Humidity {env.relative_humidity}%")
-        if env.barometric_pressure != 0.0:
-            telemetry.environment_metrics.barometric_pressure = float(env.barometric_pressure)
-            metrics.append(f"Pressure {env.barometric_pressure}hPa")
-        if env.gas_resistance != 0.0:
-            telemetry.environment_metrics.gas_resistance = float(env.gas_resistance)
-            metrics.append(f"Gas {env.gas_resistance}Ω")
-        if env.voltage != 0.0:
-            telemetry.environment_metrics.voltage = float(env.voltage)
-            metrics.append(f"Volt {env.voltage}V")
-        if env.current != 0.0:
-            telemetry.environment_metrics.current = float(env.current)
-            metrics.append(f"Current {env.current}mA")
-        if env.iaq != 0:
-            telemetry.environment_metrics.iaq = int(env.iaq)
-            metrics.append(f"IAQ {env.iaq}")
-        if env.distance != 0.0:
-            telemetry.environment_metrics.distance = float(env.distance)
-            metrics.append(f"Distance {env.distance}m")
-        if env.lux != 0.0:
-            telemetry.environment_metrics.lux = float(env.lux)
-            metrics.append(f"Lux {env.lux}")
-        if env.white_lux != 0.0:
-            telemetry.environment_metrics.white_lux = float(env.white_lux)
-            metrics.append(f"WhiteLux {env.white_lux}")
-        if env.ir_lux != 0.0:
-            telemetry.environment_metrics.ir_lux = float(env.ir_lux)
-            metrics.append(f"IR {env.ir_lux}")
-        if env.uv_lux != 0.0:
-            telemetry.environment_metrics.uv_lux = float(env.uv_lux)
-            metrics.append(f"UV {env.uv_lux}")
-        if env.wind_direction != 0:
-            telemetry.environment_metrics.wind_direction = int(env.wind_direction)
-            metrics.append(f"WindDir {env.wind_direction}°")
-        if env.wind_speed != 0.0:
-            telemetry.environment_metrics.wind_speed = float(env.wind_speed)
-            metrics.append(f"WindSpeed {env.wind_speed}m/s")
-        if env.weight != 0.0:
-            telemetry.environment_metrics.weight = float(env.weight)
-            metrics.append(f"Weight {env.weight}kg")
-        if env.wind_gust != 0.0:
-            telemetry.environment_metrics.wind_gust = float(env.wind_gust)
-            metrics.append(f"Gust {env.wind_gust}m/s")
-        if env.wind_lull != 0.0:
-            telemetry.environment_metrics.wind_lull = float(env.wind_lull)
-            metrics.append(f"Lull {env.wind_lull}m/s")
-        if env.radiation != 0.0:
-            telemetry.environment_metrics.radiation = float(env.radiation)
-            metrics.append(f"Radiation {env.radiation}cpm")
-        if env.rainfall_1h != 0.0:
-            telemetry.environment_metrics.rainfall_1h = float(env.rainfall_1h)
-            metrics.append(f"Rain1h {env.rainfall_1h}mm")
-        if env.rainfall_24h != 0.0:
-            telemetry.environment_metrics.rainfall_24h = float(env.rainfall_24h)
-            metrics.append(f"Rain24h {env.rainfall_24h}mm")
-        if env.soil_moisture != 0.0:
-            telemetry.environment_metrics.soil_moisture = int(env.soil_moisture)
-            metrics.append(f"SoilMoisture {env.soil_moisture}%")
-        if env.soil_temperature != 0.0:
-            telemetry.environment_metrics.soil_temperature = float(env.soil_temperature)
-            metrics.append(f"SoilTemp {env.soil_temperature}°C")
+        for field_name, field_type, unit, display_name in ENV_FIELD_CONFIG:
+            value = getattr(env, field_name, None)
+
+            # Skip zero or None values
+            if value is None or value == 0 or (isinstance(value, float) and value == 0.0):
+                continue
+
+            # Set protobuf field
+            setattr(telemetry.environment_metrics, field_name, field_type(value))
+
+            # Format display message
+            metrics.append(f"{display_name} {value}{unit}")
 
         mesh_packet = self._create_base_mesh_packet(
             to_node=0xFFFFFFFF,
