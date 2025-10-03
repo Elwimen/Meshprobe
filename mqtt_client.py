@@ -78,9 +78,13 @@ def main():
     listen_parser.add_argument('--hex-dump', choices=['encrypted', 'decrypted', 'all'],
                                help='Show hex/ASCII dump: encrypted=failed decryption, decrypted=successfully decoded, all=both')
     filter_arg = listen_parser.add_argument('--filter', type=str,
-                               help='Filter by message types (comma-separated): text,position,nodeinfo,telemetry,routing,neighbor,map,encrypted,ascii. Use / suffix to exclude: encrypted/')
+                               help='Show only these message types (comma-separated): text,position,nodeinfo,telemetry,routing,neighbor,map,encrypted,ascii')
     if ARGCOMPLETE_AVAILABLE:
         filter_arg.completer = filter_completer
+    filter_out_arg = listen_parser.add_argument('--filter-out', type=str,
+                               help='Hide these message types (comma-separated): text,position,nodeinfo,telemetry,routing,neighbor,map,encrypted,ascii')
+    if ARGCOMPLETE_AVAILABLE:
+        filter_out_arg.completer = filter_completer
     listen_parser.add_argument('--colored', action='store_true', help='Use colored output in hex dump')
 
     subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
@@ -123,35 +127,43 @@ def main():
 
     # Parse and validate filter types
     filter_types = None
-    if args.command == 'listen' and hasattr(args, 'filter') and args.filter:
+    if args.command == 'listen':
         valid_types = {'text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'encrypted', 'ascii'}
 
         include_types = set()
         exclude_types = set()
 
-        for t in args.filter.split(','):
-            t = t.strip().lower()
-            if t.endswith('/'):
-                # Exclude type (negation)
-                type_name = t[:-1]
-                if type_name not in valid_types:
-                    print(f"Error: Invalid filter type: {t}")
-                    print(f"Valid types: {', '.join(sorted(valid_types))}")
-                    sys.exit(1)
-                exclude_types.add(type_name)
-            else:
-                # Include type
+        # Parse --filter
+        if hasattr(args, 'filter') and args.filter:
+            for t in args.filter.split(','):
+                t = t.strip().lower()
                 if t not in valid_types:
                     print(f"Error: Invalid filter type: {t}")
                     print(f"Valid types: {', '.join(sorted(valid_types))}")
                     sys.exit(1)
                 include_types.add(t)
 
+        # Parse --filter-out
+        if hasattr(args, 'filter_out') and args.filter_out:
+            for t in args.filter_out.split(','):
+                t = t.strip().lower()
+                if t not in valid_types:
+                    print(f"Error: Invalid filter-out type: {t}")
+                    print(f"Valid types: {', '.join(sorted(valid_types))}")
+                    sys.exit(1)
+                exclude_types.add(t)
+
+        # If both --filter and --filter-out are used, remove excluded types from include
+        if include_types and exclude_types:
+            include_types -= exclude_types
+            exclude_types.clear()  # Only use include logic when both are specified
+
         # Store as dict with include and exclude sets
-        filter_types = {
-            'include': include_types,
-            'exclude': exclude_types
-        }
+        if include_types or exclude_types:
+            filter_types = {
+                'include': include_types,
+                'exclude': exclude_types
+            }
 
     client = MeshtasticMQTTClient(server_config, node_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
 
