@@ -86,6 +86,19 @@ class MeshtasticMQTTClient:
             logger.debug("Skipping JSON payload")
             return
 
+        if self._is_ascii_text(msg.payload):
+            text = msg.payload.decode('ascii').strip()
+            logger.debug(f"ASCII text message on {msg.topic}: {text}")
+
+            # Display ASCII message
+            from .formatters import SEPARATOR_WIDTH
+            print(f"\n{'=' * SEPARATOR_WIDTH}")
+            print(f"ASCII: {msg.topic}")
+            print(f"{'─' * SEPARATOR_WIDTH}")
+            print(f"{text}")
+            print(f"{'=' * SEPARATOR_WIDTH}\n")
+            return
+
         if self._try_handle_direct_map_report(msg):
             logger.debug("Handled as direct map report")
             return
@@ -106,6 +119,19 @@ class MeshtasticMQTTClient:
             return byte in (0x7B, 0x5B)  # { or [
 
         return False
+
+    @staticmethod
+    def _is_ascii_text(payload: bytes) -> bool:
+        """Check if payload is plain ASCII text."""
+        if not payload or len(payload) > 1024:  # Skip large payloads
+            return False
+
+        # Check if all bytes are printable ASCII or whitespace
+        for byte in payload:
+            if not (0x20 <= byte <= 0x7E or byte in (0x09, 0x0A, 0x0D)):
+                return False
+
+        return True
 
     def _try_handle_direct_map_report(self, msg) -> bool:
         """Try to handle direct MAP REPORT messages on /map/ topics."""
