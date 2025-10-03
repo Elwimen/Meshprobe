@@ -225,7 +225,10 @@ class MeshtasticMQTTClient:
 
         logger.debug(f"Packet fields: decoded={packet.HasField('decoded')}, encrypted={packet.HasField('encrypted')}")
         if packet.HasField('decoded'):
-            portnum_name = portnums_pb2.PortNum.Name(packet.decoded.portnum)
+            try:
+                portnum_name = portnums_pb2.PortNum.Name(packet.decoded.portnum)
+            except ValueError:
+                portnum_name = f"UNKNOWN_{packet.decoded.portnum}"
             logger.debug(f"Decoded packet: portnum={packet.decoded.portnum} ({portnum_name})")
 
         data = None
@@ -271,7 +274,12 @@ class MeshtasticMQTTClient:
         parsed_msg = self.parser.create_parsed_message(msg, service_envelope, packet, data)
 
         if data:
-            portnum_name = portnums_pb2.PortNum.Name(data.portnum)
+            try:
+                portnum_name = portnums_pb2.PortNum.Name(data.portnum)
+            except ValueError:
+                portnum_name = f"UNKNOWN_PORTNUM_{data.portnum}"
+                logger.warning(f"Unknown portnum value: {data.portnum}")
+
             self.stats.increment_portnum(portnum_name)
             logger.info(f"Received {portnum_name} from {parsed_msg.packet_info.from_node_hex}")
 
