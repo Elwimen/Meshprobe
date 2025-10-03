@@ -19,6 +19,28 @@ from meshtastic_mqtt.config import ServerConfig, NodeConfig, create_default_conf
 from meshtastic_mqtt.logging_config import setup_logging
 
 
+def filter_completer(prefix, parsed_args, **kwargs):
+    """Custom completer for comma-separated filter types."""
+    valid_types = ['text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'encrypted', 'ascii']
+
+    # If there's a comma, complete after the last comma
+    if ',' in prefix:
+        # Get already specified types
+        parts = prefix.split(',')
+        already_specified = [p.strip() for p in parts[:-1]]
+        current = parts[-1]
+
+        # Filter out already specified types
+        available = [t for t in valid_types if t not in already_specified]
+
+        # Return completions with the prefix preserved
+        prefix_without_current = ','.join(parts[:-1]) + ','
+        return [prefix_without_current + t for t in available if t.startswith(current)]
+    else:
+        # Complete the first type
+        return [t for t in valid_types if t.startswith(prefix)]
+
+
 def main():
     parser = argparse.ArgumentParser(description='Meshtastic MQTT Client')
     parser.add_argument('--server-config', default='server_config.json',
@@ -55,6 +77,10 @@ def main():
     listen_parser.add_argument('--openssl-password', type=str, help='Password to decrypt OpenSSL-encrypted messages')
     listen_parser.add_argument('--hex-dump', choices=['encrypted', 'decrypted', 'all'],
                                help='Show hex/ASCII dump: encrypted=failed decryption, decrypted=successfully decoded, all=both')
+    filter_arg = listen_parser.add_argument('--filter', type=str,
+                               help='Filter by message types (comma-separated): text,position,nodeinfo,telemetry,routing,neighbor,map,encrypted,ascii. Use / suffix to exclude: encrypted/')
+    if ARGCOMPLETE_AVAILABLE:
+        filter_arg.completer = filter_completer
     listen_parser.add_argument('--colored', action='store_true', help='Use colored output in hex dump')
 
     subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
@@ -95,7 +121,39 @@ def main():
     hex_dump_mode = args.hex_dump if args.command == 'listen' and hasattr(args, 'hex_dump') else None
     hex_dump_colored = args.colored if args.command == 'listen' and hasattr(args, 'colored') else False
 
-    client = MeshtasticMQTTClient(server_config, node_config, openssl_password, hex_dump_mode, hex_dump_colored)
+    # Parse and validate filter types
+    filter_types = None
+    if args.command == 'listen' and hasattr(args, 'filter') and args.filter:
+        valid_types = {'text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'encrypted', 'ascii'}
+
+        include_types = set()
+        exclude_types = set()
+
+        for t in args.filter.split(','):
+            t = t.strip().lower()
+            if t.endswith('/'):
+                # Exclude type (negation)
+                type_name = t[:-1]
+                if type_name not in valid_types:
+                    print(f"Error: Invalid filter type: {t}")
+                    print(f"Valid types: {', '.join(sorted(valid_types))}")
+                    sys.exit(1)
+                exclude_types.add(type_name)
+            else:
+                # Include type
+                if t not in valid_types:
+                    print(f"Error: Invalid filter type: {t}")
+                    print(f"Valid types: {', '.join(sorted(valid_types))}")
+                    sys.exit(1)
+                include_types.add(t)
+
+        # Store as dict with include and exclude sets
+        filter_types = {
+            'include': include_types,
+            'exclude': exclude_types
+        }
+
+    client = MeshtasticMQTTClient(server_config, node_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
 
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')

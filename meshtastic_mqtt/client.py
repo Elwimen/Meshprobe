@@ -33,7 +33,7 @@ class MeshtasticMQTTClient:
 
     def __init__(self, server_config: ServerConfig, node_config: NodeConfig,
                  openssl_password: Optional[str] = None, hex_dump: Optional[str] = None,
-                 hex_dump_colored: bool = False):
+                 hex_dump_colored: bool = False, filter_types: Optional[dict] = None):
         """
         Initialize MeshtasticMQTTClient.
 
@@ -43,12 +43,14 @@ class MeshtasticMQTTClient:
             openssl_password: Optional password for OpenSSL-encrypted messages
             hex_dump: Hex dump mode: 'encrypted', 'decrypted', or 'all' (None = disabled)
             hex_dump_colored: Use colored output in hex dump
+            filter_types: Dict with 'include' and 'exclude' sets (None = show all)
         """
         self.server_config = server_config
         self.node_config = node_config
         self.client: Optional[mqtt.Client] = None
         self.connected = False
         self.subscribe_mode = False
+        self.filter_types = filter_types
 
         self.node_db = NodeDatabase()
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
@@ -58,6 +60,17 @@ class MeshtasticMQTTClient:
         self.stats = Statistics()
 
         self.publisher: Optional[MessagePublisher] = None
+
+        # Create filter mapping from user-friendly names to portnum names
+        self.filter_portnum_map = {
+            'text': 'TEXT_MESSAGE_APP',
+            'position': 'POSITION_APP',
+            'nodeinfo': 'NODEINFO_APP',
+            'telemetry': 'TELEMETRY_APP',
+            'routing': 'ROUTING_APP',
+            'neighbor': 'NEIGHBORINFO_APP',
+            'map': 'MAP_REPORT_APP'
+        }
 
     def on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
@@ -89,6 +102,16 @@ class MeshtasticMQTTClient:
         if self._is_ascii_text(msg.payload):
             text = msg.payload.decode('ascii').strip()
             logger.debug(f"ASCII text message on {msg.topic}: {text}")
+
+            # Check if ASCII messages are filtered
+            if self.filter_types:
+                include = self.filter_types.get('include', set())
+                exclude = self.filter_types.get('exclude', set())
+
+                if include and 'ascii' not in include:
+                    return
+                if 'ascii' in exclude:
+                    return
 
             # Display ASCII message
             from .formatters import SEPARATOR_WIDTH
@@ -210,6 +233,19 @@ class MeshtasticMQTTClient:
             else:
                 self.stats.failed_decrypts += 1
                 logger.debug("Failed to decrypt packet")
+
+                # Check if encrypted packets are filtered
+                if self.filter_types:
+                    include = self.filter_types.get('include', set())
+                    exclude = self.filter_types.get('exclude', set())
+
+                    if include and 'encrypted' not in include:
+                        logger.debug("Filtered out encrypted packet")
+                        return
+                    if 'encrypted' in exclude:
+                        logger.debug("Filtered out encrypted packet")
+                        return
+
                 packet_info = self.parser.parse_packet_info(packet)
                 encrypted_data = bytes(packet.encrypted) if packet.HasField('encrypted') else None
 
@@ -232,6 +268,25 @@ class MeshtasticMQTTClient:
             portnum_name = portnums_pb2.PortNum.Name(data.portnum)
             self.stats.increment_portnum(portnum_name)
             logger.info(f"Received {portnum_name} from {parsed_msg.packet_info.from_node_hex}")
+
+            # Check if message type is filtered
+            if self.filter_types:
+                include = self.filter_types.get('include', set())
+                exclude = self.filter_types.get('exclude', set())
+
+                if include:
+                    # Convert include types to portnum names
+                    allowed_portnums = {self.filter_portnum_map.get(ft) for ft in include if ft not in ('encrypted', 'ascii')}
+                    if portnum_name not in allowed_portnums:
+                        logger.debug(f"Filtered out {portnum_name}")
+                        return
+
+                # Check exclude
+                if exclude:
+                    excluded_portnums = {self.filter_portnum_map.get(ft) for ft in exclude if ft not in ('encrypted', 'ascii')}
+                    if portnum_name in excluded_portnums:
+                        logger.debug(f"Filtered out {portnum_name}")
+                        return
 
         print(f"\n{self.formatter.format_message(parsed_msg)}\n")
 
