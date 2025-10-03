@@ -19,6 +19,9 @@ from .models import (
     NeighborInfo, NeighborData, MapReport, ParsedMessage
 )
 from .node_db import NodeDatabase
+from .logging_config import get_logger
+
+logger = get_logger('parsers')
 
 
 class MessageParser:
@@ -136,7 +139,8 @@ class MessageParser:
                 )
 
             return pos_data
-        except Exception:
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"Failed to parse position: {e}")
             return None
 
     def _parse_nodeinfo(self, payload: bytes) -> Optional[NodeInfo]:
@@ -176,7 +180,8 @@ class MessageParser:
                 )
 
             return node_info
-        except Exception:
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"Failed to parse node info: {e}")
             return None
 
     def _parse_telemetry(self, payload: bytes, from_node_hex: str = None) -> Optional[DeviceTelemetry | EnvironmentTelemetry]:
@@ -210,49 +215,26 @@ class MessageParser:
 
             if telemetry.HasField('environment_metrics'):
                 em = telemetry.environment_metrics
-                env_telem = EnvironmentTelemetry(
-                    temperature=em.temperature if em.temperature else None,
-                    relative_humidity=em.relative_humidity if em.relative_humidity else None,
-                    barometric_pressure=em.barometric_pressure if em.barometric_pressure else None,
-                    gas_resistance=em.gas_resistance if em.gas_resistance else None,
-                    voltage=em.voltage if em.voltage else None,
-                    current=em.current if em.current else None,
-                    iaq=em.iaq if em.iaq else None,
-                    distance=em.distance if em.distance else None,
-                    lux=em.lux if em.lux else None,
-                    white_lux=em.white_lux if em.white_lux else None,
-                    ir_lux=em.ir_lux if em.ir_lux else None,
-                    uv_lux=em.uv_lux if em.uv_lux else None,
-                    wind_direction=em.wind_direction if em.wind_direction else None,
-                    wind_speed=em.wind_speed if em.wind_speed else None,
-                    weight=em.weight if em.weight else None,
-                    wind_gust=em.wind_gust if em.wind_gust else None,
-                    wind_lull=em.wind_lull if em.wind_lull else None,
-                    radiation=em.radiation if em.radiation else None,
-                    rainfall_1h=em.rainfall_1h if em.rainfall_1h else None,
-                    rainfall_24h=em.rainfall_24h if em.rainfall_24h else None,
-                    soil_moisture=em.soil_moisture if em.soil_moisture else None,
-                    soil_temperature=em.soil_temperature if em.soil_temperature else None
-                )
+
+                # Extract all fields from protobuf message dynamically
+                env_data = {}
+                for field in EnvironmentTelemetry.__dataclass_fields__:
+                    value = getattr(em, field, None)
+                    # Only include non-zero values
+                    if value and value != 0:
+                        env_data[field] = value
+
+                env_telem = EnvironmentTelemetry(**env_data)
 
                 # Add to node database if available
-                if self.node_db is not None and from_node_hex:
-                    metrics = {}
-                    fields = ['temperature', 'relative_humidity', 'barometric_pressure', 'gas_resistance',
-                             'voltage', 'current', 'iaq', 'distance', 'lux', 'white_lux', 'ir_lux', 'uv_lux',
-                             'wind_direction', 'wind_speed', 'weight', 'wind_gust', 'wind_lull', 'radiation',
-                             'rainfall_1h', 'rainfall_24h', 'soil_moisture', 'soil_temperature']
-                    for field in fields:
-                        value = getattr(env_telem, field, None)
-                        if value is not None:
-                            metrics[field] = value
-
-                    self.node_db.add_environment_metrics(node_id=from_node_hex, **metrics)
+                if self.node_db is not None and from_node_hex and env_data:
+                    self.node_db.add_environment_metrics(node_id=from_node_hex, **env_data)
 
                 return env_telem
 
             return None
-        except Exception:
+        except (ValueError, AttributeError) as e:
+            logger.debug(f"Failed to parse telemetry: {e}")
             return None
 
     @staticmethod
@@ -263,7 +245,7 @@ class MessageParser:
             routing.ParseFromString(payload)
             error_reason = mesh_pb2.Routing.Error.Name(routing.error_reason) if routing.error_reason else "ACK"
             return RoutingInfo(error_reason=error_reason)
-        except Exception:
+        except (ValueError, AttributeError):
             return None
 
     @staticmethod
@@ -295,7 +277,7 @@ class MessageParser:
                 broadcast_interval_secs=neighbor_info.node_broadcast_interval_secs,
                 neighbors=neighbors
             )
-        except Exception:
+        except (ValueError, AttributeError):
             return None
 
     def _parse_map_report(self, payload: bytes, from_node_hex: str = None) -> Optional[MapReport]:
@@ -336,7 +318,7 @@ class MessageParser:
                 region=region_name,
                 modem_preset=modem_preset_name
             )
-        except Exception:
+        except (ValueError, AttributeError):
             return None
 
     def create_parsed_message(
@@ -378,7 +360,7 @@ class MessageParser:
             try:
                 portnum_name = portnums_pb2.PortNum.Name(portnum)
             except ValueError:
-                portnum_name = f"UNKNOWN_{portnum}"
+                portnum_name = f"UNKNOWN_PORTNUM_{portnum}"
             content = self.parse_message_content(portnum, data.payload, packet_info.from_node_hex, packet_info.to_node_hex)
 
         return ParsedMessage(

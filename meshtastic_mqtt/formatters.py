@@ -24,6 +24,33 @@ from .hex_dump import hex_dump
 # Message formatting width
 SEPARATOR_WIDTH = 68
 
+# Environment telemetry display configuration
+# Format: field_name: (display_name, format_spec, unit)
+ENV_DISPLAY_CONFIG = {
+    'temperature': ('Temperature', '.1f', '°C'),
+    'relative_humidity': ('Humidity', '.1f', '%'),
+    'barometric_pressure': ('Pressure', '.1f', ' hPa'),
+    'gas_resistance': ('Gas Resistance', '.0f', ' Ω'),
+    'voltage': ('Voltage', '.2f', ' V'),
+    'current': ('Current', '.1f', ' mA'),
+    'iaq': ('IAQ', 'd', ''),
+    'distance': ('Distance', '.1f', ' m'),
+    'lux': ('Lux', '.1f', ''),
+    'white_lux': ('White Lux', '.1f', ''),
+    'ir_lux': ('IR Lux', '.1f', ''),
+    'uv_lux': ('UV Lux', '.1f', ''),
+    'wind_direction': ('Wind Direction', 'd', '°'),
+    'wind_speed': ('Wind Speed', '.1f', ' m/s'),
+    'wind_gust': ('Wind Gust', '.1f', ' m/s'),
+    'wind_lull': ('Wind Lull', '.1f', ' m/s'),
+    'weight': ('Weight', '.1f', ' kg'),
+    'radiation': ('Radiation', '.1f', ' cpm'),
+    'rainfall_1h': ('Rainfall (1h)', '.1f', ' mm'),
+    'rainfall_24h': ('Rainfall (24h)', '.1f', ' mm'),
+    'soil_moisture': ('Soil Moisture', '.1f', '%'),
+    'soil_temperature': ('Soil Temperature', '.1f', '°C'),
+}
+
 
 class MessageFormatter:
     """Formatter for console output of Meshtastic messages."""
@@ -214,50 +241,14 @@ class MessageFormatter:
         """Format environment telemetry."""
         lines = ["🌡️  ENVIRONMENT TELEMETRY"]
 
-        if telemetry.temperature and telemetry.temperature != 0:
-            lines.append(f"   Temperature:      {telemetry.temperature:.1f}°C")
-        if telemetry.relative_humidity and telemetry.relative_humidity != 0:
-            lines.append(f"   Humidity:         {telemetry.relative_humidity:.1f}%")
-        if telemetry.barometric_pressure and telemetry.barometric_pressure != 0:
-            lines.append(f"   Pressure:         {telemetry.barometric_pressure:.1f} hPa")
-        if telemetry.gas_resistance and telemetry.gas_resistance != 0:
-            lines.append(f"   Gas Resistance:   {telemetry.gas_resistance:.0f} Ω")
-        if telemetry.voltage and telemetry.voltage != 0:
-            lines.append(f"   Voltage:          {telemetry.voltage:.2f} V")
-        if telemetry.current and telemetry.current != 0:
-            lines.append(f"   Current:          {telemetry.current:.1f} mA")
-        if telemetry.iaq and telemetry.iaq != 0:
-            lines.append(f"   IAQ:              {telemetry.iaq}")
-        if telemetry.distance and telemetry.distance != 0:
-            lines.append(f"   Distance:         {telemetry.distance:.1f} m")
-        if telemetry.lux and telemetry.lux != 0:
-            lines.append(f"   Lux:              {telemetry.lux:.1f}")
-        if telemetry.white_lux and telemetry.white_lux != 0:
-            lines.append(f"   White Lux:        {telemetry.white_lux:.1f}")
-        if telemetry.ir_lux and telemetry.ir_lux != 0:
-            lines.append(f"   IR Lux:           {telemetry.ir_lux:.1f}")
-        if telemetry.uv_lux and telemetry.uv_lux != 0:
-            lines.append(f"   UV Lux:           {telemetry.uv_lux:.1f}")
-        if telemetry.wind_direction and telemetry.wind_direction != 0:
-            lines.append(f"   Wind Direction:   {telemetry.wind_direction}°")
-        if telemetry.wind_speed and telemetry.wind_speed != 0:
-            lines.append(f"   Wind Speed:       {telemetry.wind_speed:.1f} m/s")
-        if telemetry.wind_gust and telemetry.wind_gust != 0:
-            lines.append(f"   Wind Gust:        {telemetry.wind_gust:.1f} m/s")
-        if telemetry.wind_lull and telemetry.wind_lull != 0:
-            lines.append(f"   Wind Lull:        {telemetry.wind_lull:.1f} m/s")
-        if telemetry.weight and telemetry.weight != 0:
-            lines.append(f"   Weight:           {telemetry.weight:.1f} kg")
-        if telemetry.radiation and telemetry.radiation != 0:
-            lines.append(f"   Radiation:        {telemetry.radiation:.1f} cpm")
-        if telemetry.rainfall_1h and telemetry.rainfall_1h != 0:
-            lines.append(f"   Rainfall (1h):    {telemetry.rainfall_1h:.1f} mm")
-        if telemetry.rainfall_24h and telemetry.rainfall_24h != 0:
-            lines.append(f"   Rainfall (24h):   {telemetry.rainfall_24h:.1f} mm")
-        if telemetry.soil_moisture and telemetry.soil_moisture != 0:
-            lines.append(f"   Soil Moisture:    {telemetry.soil_moisture:.1f}%")
-        if telemetry.soil_temperature and telemetry.soil_temperature != 0:
-            lines.append(f"   Soil Temperature: {telemetry.soil_temperature:.1f}°C")
+        for field, (display_name, format_spec, unit) in ENV_DISPLAY_CONFIG.items():
+            value = getattr(telemetry, field, None)
+
+            if value is None or value == 0:
+                continue
+
+            formatted_value = f"{value:{format_spec}}"
+            lines.append(f"   {display_name:18s} {formatted_value}{unit}")
 
         return "\n".join(lines)
 
