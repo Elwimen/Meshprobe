@@ -21,6 +21,9 @@ from .crypto import CryptoEngine
 from .node_db import NodeDatabase
 from .hex_dump import hex_dump
 
+# Message formatting width
+SEPARATOR_WIDTH = 68
+
 
 class MessageFormatter:
     """Formatter for console output of Meshtastic messages."""
@@ -52,7 +55,7 @@ class MessageFormatter:
             Formatted string for console output
         """
         lines = []
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
 
         # Add local receive timestamp
         receive_time = datetime.now()
@@ -86,7 +89,7 @@ class MessageFormatter:
             lines.append("Want ACK: Yes")
 
         lines.append(f"Packet ID: {parsed_msg.packet_info.packet_id_hex}")
-        lines.append("─" * 60)
+        lines.append("─" * SEPARATOR_WIDTH)
 
         if parsed_msg.content:
             lines.append(self._format_content(parsed_msg.content))
@@ -97,11 +100,11 @@ class MessageFormatter:
         if self.hex_dump in ('decrypted', 'all') and parsed_msg.decoded_payload_b64:
             import base64
             payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
-            lines.append("─" * 60)
+            lines.append("─" * SEPARATOR_WIDTH)
             lines.append(f"Raw payload ({len(payload_bytes)} bytes):")
             lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
 
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
         return "\n".join(lines)
 
     def _format_content(self, content) -> str:
@@ -304,9 +307,9 @@ class MessageFormatter:
     def format_statistics(stats: Statistics) -> str:
         """Format statistics summary."""
         lines = []
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
         lines.append("STATISTICS SUMMARY")
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
         lines.append(f"Total messages:       {stats.total_messages}")
         lines.append(f"Parse errors:         {stats.parse_errors}")
         lines.append(f"Successful decrypts:  {stats.successful_decrypts}")
@@ -318,16 +321,16 @@ class MessageFormatter:
             for portnum_name, count in stats.get_sorted_portnums():
                 lines.append(f"  {portnum_name:25s} {count:5d}")
 
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
         return "\n".join(lines)
 
     def format_encrypted_failure(self, packet_info, encrypted_data: bytes = None) -> str:
         """Format message for failed decryption."""
         lines = []
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
         lines.append(f"From: {packet_info.from_node_hex} → To: {packet_info.to_node_hex}")
         lines.append(f"Packet ID: {packet_info.packet_id_hex}")
-        lines.append("─" * 60)
+        lines.append("─" * SEPARATOR_WIDTH)
 
         if self.hex_dump in ('encrypted', 'all') and encrypted_data:
             lines.append(f"🔒 Encrypted payload ({len(encrypted_data)} bytes):")
@@ -335,5 +338,5 @@ class MessageFormatter:
         else:
             lines.append("🔒 ENCRYPTED (unable to decrypt)")
 
-        lines.append("=" * 60)
+        lines.append("=" * SEPARATOR_WIDTH)
         return "\n".join(lines)
