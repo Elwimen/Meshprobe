@@ -21,6 +21,8 @@ from .publishers import MessagePublisher
 from .models import Statistics
 from .node_db import NodeDatabase
 from .logging_config import get_logger
+from .message_filter import MessageFilter
+from .utils import is_json_payload, is_ascii_text
 
 logger = get_logger('client')
 
@@ -53,7 +55,6 @@ class MeshtasticMQTTClient:
         self.client: Optional[mqtt.Client] = None
         self.connected = False
         self.subscribe_mode = False
-        self.filter_types = filter_types
 
         self.node_db = NodeDatabase(
             nodes_dir=client_config.nodes_dir,
@@ -64,19 +65,9 @@ class MeshtasticMQTTClient:
         self.parser = MessageParser(self.node_db)
         self.formatter = MessageFormatter(self.crypto, self.node_db, hex_dump, hex_dump_colored)
         self.stats = Statistics()
+        self.message_filter = MessageFilter(filter_types)
 
         self.publisher: Optional[MessagePublisher] = None
-
-        # Create filter mapping from user-friendly names to portnum names
-        self.filter_portnum_map = {
-            'text': 'TEXT_MESSAGE_APP',
-            'position': 'POSITION_APP',
-            'nodeinfo': 'NODEINFO_APP',
-            'telemetry': 'TELEMETRY_APP',
-            'routing': 'ROUTING_APP',
-            'neighbor': 'NEIGHBORINFO_APP',
-            'map': 'MAP_REPORT_APP'
-        }
 
     def on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
@@ -101,23 +92,18 @@ class MeshtasticMQTTClient:
         self.stats.total_messages += 1
         logger.debug(f"Received message: topic={msg.topic}, payload_len={len(msg.payload)}")
 
-        if self._is_json_payload(msg.payload):
+        if is_json_payload(msg.payload):
             logger.debug("Skipping JSON payload")
             return
 
-        if self._is_ascii_text(msg.payload):
+        if is_ascii_text(msg.payload):
             text = msg.payload.decode('ascii').strip()
             logger.debug(f"ASCII text message on {msg.topic}: {text}")
 
             # Check if ASCII messages are filtered
-            if self.filter_types:
-                include = self.filter_types.get('include', set())
-                exclude = self.filter_types.get('exclude', set())
-
-                if include and 'ascii' not in include:
-                    return
-                if 'ascii' in exclude:
-                    return
+            if self.message_filter.should_filter_ascii():
+                logger.debug("Filtered out ASCII message")
+                return
 
             # Display ASCII message
             from .formatters import SEPARATOR_WIDTH
@@ -134,33 +120,21 @@ class MeshtasticMQTTClient:
 
         self._handle_service_envelope(msg)
 
-    @staticmethod
-    def _is_json_payload(payload: bytes) -> bool:
-        """Check if payload is JSON by examining first non-whitespace character."""
-        if not payload:
-            return False
+    def _get_portnum_name(self, portnum: int) -> str:
+        """
+        Get portnum name with fallback for unknown values.
 
-        # Skip leading whitespace
-        for byte in payload:
-            if byte in (0x20, 0x09, 0x0A, 0x0D):  # space, tab, LF, CR
-                continue
-            # JSON must start with { or [
-            return byte in (0x7B, 0x5B)  # { or [
+        Args:
+            portnum: Portnum integer value
 
-        return False
-
-    @staticmethod
-    def _is_ascii_text(payload: bytes) -> bool:
-        """Check if payload is plain ASCII text."""
-        if not payload or len(payload) > 1024:  # Skip large payloads
-            return False
-
-        # Check if all bytes are printable ASCII or whitespace
-        for byte in payload:
-            if not (0x20 <= byte <= 0x7E or byte in (0x09, 0x0A, 0x0D)):
-                return False
-
-        return True
+        Returns:
+            Portnum name or UNKNOWN_PORTNUM_{value} for unknown portnums
+        """
+        try:
+            return portnums_pb2.PortNum.Name(portnum)
+        except ValueError:
+            logger.warning(f"Unknown portnum value: {portnum}")
+            return f"UNKNOWN_PORTNUM_{portnum}"
 
     def _try_handle_direct_map_report(self, msg) -> bool:
         """Try to handle direct MAP REPORT messages on /map/ topics."""
@@ -244,16 +218,9 @@ class MeshtasticMQTTClient:
                 logger.debug("Failed to decrypt packet")
 
                 # Check if encrypted packets are filtered
-                if self.filter_types:
-                    include = self.filter_types.get('include', set())
-                    exclude = self.filter_types.get('exclude', set())
-
-                    if include and 'encrypted' not in include:
-                        logger.debug("Filtered out encrypted packet")
-                        return
-                    if 'encrypted' in exclude:
-                        logger.debug("Filtered out encrypted packet")
-                        return
+                if self.message_filter.should_filter_encrypted():
+                    logger.debug("Filtered out encrypted packet")
+                    return
 
                 packet_info = self.parser.parse_packet_info(packet)
                 encrypted_data = bytes(packet.encrypted) if packet.HasField('encrypted') else None
@@ -274,33 +241,14 @@ class MeshtasticMQTTClient:
         parsed_msg = self.parser.create_parsed_message(msg, service_envelope, packet, data)
 
         if data:
-            try:
-                portnum_name = portnums_pb2.PortNum.Name(data.portnum)
-            except ValueError:
-                portnum_name = f"UNKNOWN_PORTNUM_{data.portnum}"
-                logger.warning(f"Unknown portnum value: {data.portnum}")
-
+            portnum_name = self._get_portnum_name(data.portnum)
             self.stats.increment_portnum(portnum_name)
             logger.info(f"Received {portnum_name} from {parsed_msg.packet_info.from_node_hex}")
 
             # Check if message type is filtered
-            if self.filter_types:
-                include = self.filter_types.get('include', set())
-                exclude = self.filter_types.get('exclude', set())
-
-                if include:
-                    # Convert include types to portnum names
-                    allowed_portnums = {self.filter_portnum_map.get(ft) for ft in include if ft not in ('encrypted', 'ascii')}
-                    if portnum_name not in allowed_portnums:
-                        logger.debug(f"Filtered out {portnum_name}")
-                        return
-
-                # Check exclude
-                if exclude:
-                    excluded_portnums = {self.filter_portnum_map.get(ft) for ft in exclude if ft not in ('encrypted', 'ascii')}
-                    if portnum_name in excluded_portnums:
-                        logger.debug(f"Filtered out {portnum_name}")
-                        return
+            if self.message_filter.should_filter_portnum(portnum_name):
+                logger.debug(f"Filtered out {portnum_name}")
+                return
 
         print(f"\n{self.formatter.format_message(parsed_msg)}\n")
 

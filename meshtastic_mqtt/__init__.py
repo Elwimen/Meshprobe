@@ -11,7 +11,8 @@ from .logger import MessageLogger
 from .formatters import MessageFormatter
 from .parsers import MessageParser
 from .publishers import MessagePublisher
-from .utils import parse_node_id, format_node_id_hex
+from .message_filter import MessageFilter
+from .utils import parse_node_id, format_node_id_hex, is_json_payload, is_ascii_text
 
 __all__ = [
     'MeshtasticMQTTClient',
@@ -26,8 +27,11 @@ __all__ = [
     'MessageFormatter',
     'MessageParser',
     'MessagePublisher',
+    'MessageFilter',
     'parse_node_id',
     'format_node_id_hex',
+    'is_json_payload',
+    'is_ascii_text',
 ]
 
 __version__ = '1.0.0'
