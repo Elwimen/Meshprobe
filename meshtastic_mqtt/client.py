@@ -122,11 +122,14 @@ class MeshtasticMQTTClient:
                 logger.debug("Filtered out ASCII message")
                 return
 
-            # Check if SALTED OpenSSL ASCII should be filtered
-            is_salted = text.startswith('U2FsdGVk')
-            if self.message_filter.should_filter_salted(is_salted):
-                logger.debug("Filtered out SALTED ASCII message")
-                return
+            # Apply refined SALTED filter for ASCII payloads
+            try:
+                is_salted_ascii = self.message_filter.is_salted_ascii(msg.payload, text)
+                if self.message_filter.should_filter_salted(is_salted_ascii):
+                    logger.debug("Filtered out SALTED ASCII message (refined filter)")
+                    return
+            except Exception:
+                pass
 
             # Display ASCII message; if raw present, print it and avoid extra top separator
             if raw_dump_text:
@@ -288,7 +291,8 @@ class MeshtasticMQTTClient:
                 return
 
         # If this is a text message that looks like raw 'Salted__' bytes, try Base64-normalized decryption first,
-        # then fall back to bytes-based decrypt (for this test, we keep both paths available)
+        # then fall back to bytes-based decrypt (for this test, we keep both paths available).
+        # If we successfully decrypt, also update node database entries so stored text is decrypted.
         try:
             from .models import TextMessage
             if isinstance(parsed_msg.content, TextMessage) and parsed_msg.content.is_openssl_encrypted and parsed_msg.content.is_salted_base64 is False:
@@ -302,6 +306,16 @@ class MeshtasticMQTTClient:
                     if decrypted:
                         parsed_msg.content.text = decrypted
                         parsed_msg.content.decrypted = True
+                        # Update node DB last message entries for from/to to store decrypted text
+                        try:
+                            from_node = parsed_msg.packet_info.from_node_hex
+                            to_node = parsed_msg.packet_info.to_node_hex
+                            # Update the most recent messages in both participants if present
+                            self.node_db.update_last_message_text(from_node, original_text=None, new_text=decrypted)
+                            if to_node and to_node != '!ffffffff':
+                                self.node_db.update_last_message_text(to_node, original_text=None, new_text=decrypted)
+                        except Exception:
+                            pass
         except Exception:
             pass
 
@@ -332,16 +346,19 @@ class MeshtasticMQTTClient:
         Connect to MQTT broker.
 
         Args:
-            use_listener_id: Use hashed listener client ID instead of node ID
+            use_listener_id: Use randomized listener client ID instead of node ID
             subscribe: Whether to subscribe to messages (False for publish-only)
 
         Returns:
             True if connected successfully, False otherwise
         """
         if use_listener_id:
-            import hashlib
-            hashed_id = hashlib.sha256(f"{self.node_config.node_id}-listener".encode()).hexdigest()[:8]
-            client_id = f"!{hashed_id}"
+            # Use a fully randomized listener client ID to avoid collisions
+            # and any association with the node ID. Keep it short but unique
+            # enough for MQTT brokers that have client ID length limits.
+            import uuid
+            rand = uuid.uuid4().hex[:8]
+            client_id = f"!{rand}"
         else:
             client_id = self.node_config.node_id
 

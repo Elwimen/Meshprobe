@@ -228,6 +228,30 @@ class NodeDatabase:
         self._update_node_timestamp(node, timestamp)
         self._mark_dirty(node_id)
 
+    def update_last_message_text(self, node_id: str, original_text: str | None, new_text: str):
+        """
+        Update the most recent message entry text for a node.
+
+        Args:
+            node_id: Node ID whose message list to update
+            original_text: If provided, only update if the last message text matches this value
+            new_text: Replacement text to store
+        """
+        if node_id not in self.nodes:
+            return
+        node = self.nodes[node_id]
+        msgs = node.get('messages') or []
+        if not msgs:
+            return
+        last = msgs[-1]
+        if original_text is None or last.get('text') == original_text:
+            last['text'] = new_text
+            # If we decrypted successfully, mark encrypted flag false since it's now plaintext
+            if last.get('encrypted') is True:
+                last['encrypted'] = False
+            self._update_node_timestamp(node, self._get_timestamp())
+            self._mark_dirty(node_id)
+
     def add_position(self, node_id: str, latitude: float, longitude: float,
                      altitude: int, timestamp: int = None):
         """
