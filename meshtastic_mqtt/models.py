@@ -29,6 +29,8 @@ class TextMessage:
     """Text message content."""
     text: str
     is_openssl_encrypted: bool = False
+    is_salted_base64: bool | None = None
+    decrypted: bool = False
 
 
 @dataclass
@@ -146,6 +148,7 @@ class ParsedMessage:
     ] = None
     encrypted_payload_b64: Optional[str] = None
     decoded_payload_b64: Optional[str] = None
+    raw_service_envelope: Optional[bytes] = None
 
 
 @dataclass
