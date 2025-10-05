@@ -16,7 +16,7 @@ except ImportError as e:
 from .config import ServerConfig, NodeConfig, ClientConfig
 from .crypto import CryptoEngine
 from .parsers import MessageParser
-from .formatters import MessageFormatter
+from .formatters import MessageFormatter, SEPARATOR_WIDTH
 from .publishers import MessagePublisher
 from .models import Statistics
 from .node_db import NodeDatabase
@@ -45,7 +45,7 @@ class MeshtasticMQTTClient:
             node_config: Node configuration
             client_config: Client configuration
             openssl_password: Optional password for OpenSSL-encrypted messages
-            hex_dump: Hex dump mode: 'encrypted', 'decrypted', or 'all' (None = disabled)
+            hex_dump: Hex dump mode: 'full', 'payload', 'encrypted', 'decrypted', or True (None = disabled)
             hex_dump_colored: Use colored output in hex dump
             filter_types: Dict with 'include' and 'exclude' sets (None = show all)
         """
@@ -61,7 +61,8 @@ class MeshtasticMQTTClient:
             flush_interval=client_config.node_db_flush_interval
         )
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
-        self.crypto = CryptoEngine(channel_keys, openssl_password)
+        openssl_iters = getattr(client_config, 'openssl_pbkdf2_iter', 10000)
+        self.crypto = CryptoEngine(channel_keys, openssl_password, openssl_iterations=openssl_iters)
         self.parser = MessageParser(self.node_db)
         self.formatter = MessageFormatter(self.crypto, self.node_db, hex_dump, hex_dump_colored)
         self.stats = Statistics()
@@ -96,6 +97,22 @@ class MeshtasticMQTTClient:
             logger.debug("Skipping JSON payload")
             return
 
+        # Prepare raw MQTT dump if requested
+        raw_dump_text = None
+        try:
+            if getattr(self.formatter, 'hex_dump', None) == 'raw':
+                from .hex_dump import hex_dump
+                lines = []
+                lines.append("=" * SEPARATOR_WIDTH)
+                lines.append(f"RAW MQTT MESSAGE ({len(msg.payload)} bytes)")
+                lines.append(f"Topic: {msg.topic}")
+                lines.append("─" * SEPARATOR_WIDTH)
+                lines.append(hex_dump(msg.payload, use_color=self.formatter.hex_dump_colored))
+                lines.append("=" * SEPARATOR_WIDTH)
+                raw_dump_text = "\n".join(lines)
+        except Exception:
+            raw_dump_text = None
+
         if is_ascii_text(msg.payload):
             text = msg.payload.decode('ascii').strip()
             logger.debug(f"ASCII text message on {msg.topic}: {text}")
@@ -105,8 +122,15 @@ class MeshtasticMQTTClient:
                 logger.debug("Filtered out ASCII message")
                 return
 
-            # Display ASCII message
-            from .formatters import SEPARATOR_WIDTH
+            # Check if SALTED OpenSSL ASCII should be filtered
+            is_salted = text.startswith('U2FsdGVk')
+            if self.message_filter.should_filter_salted(is_salted):
+                logger.debug("Filtered out SALTED ASCII message")
+                return
+
+            # Display ASCII message; if raw present, print it and avoid extra top separator
+            if raw_dump_text:
+                print(f"\n{raw_dump_text}")
             print(f"\n{'=' * SEPARATOR_WIDTH}")
             print(f"ASCII: {msg.topic}")
             print(f"{'─' * SEPARATOR_WIDTH}")
@@ -116,9 +140,12 @@ class MeshtasticMQTTClient:
 
         if self._try_handle_direct_map_report(msg):
             logger.debug("Handled as direct map report")
+            if raw_dump_text:
+                # Print raw first, then the map report which already includes separators
+                print(f"\n{raw_dump_text}")
             return
 
-        self._handle_service_envelope(msg)
+        self._handle_service_envelope(msg, raw_dump_text)
 
     def _get_portnum_name(self, portnum: int) -> str:
         """
@@ -154,12 +181,12 @@ class MeshtasticMQTTClient:
             lat = map_report.latitude_i / 1e7
             lon = map_report.longitude_i / 1e7
 
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * SEPARATOR_WIDTH}")
             print(f"Topic: {msg.topic}")
             print(f"From: {gateway_id} → To: !ffffffff")
             print(f"Gateway: {gateway_id}, Channel: unknown")
             print(f"Packet ID: 0x00000000")
-            print(f"{'─'*60}")
+            print(f"{'─' * SEPARATOR_WIDTH}")
             print("🗺️  MAP REPORT")
             print(f"   Long name:  {map_report.long_name}")
             print(f"   Short name: {map_report.short_name}")
@@ -176,12 +203,12 @@ class MeshtasticMQTTClient:
                 preset_name = config_pb2.Config.LoRaConfig.ModemPreset.Name(map_report.modem_preset)
                 print(f"   Modem:      {preset_name}")
 
-            print(f"{'='*60}")
+            print(f"{'=' * SEPARATOR_WIDTH}")
             return True
         except Exception:
             return False
 
-    def _handle_service_envelope(self, msg):
+    def _handle_service_envelope(self, msg, raw_dump_text: str | None = None):
         """Handle ServiceEnvelope MQTT messages."""
         logger.debug(f"Handling ServiceEnvelope on topic: {msg.topic}")
         try:
@@ -193,6 +220,7 @@ class MeshtasticMQTTClient:
             dump = hex_dump(msg.payload, use_color=self.formatter.hex_dump_colored)
             logger.error(f"Payload dump:\n{dump}")
             return
+
 
         packet = service_envelope.packet
         channel_id = service_envelope.channel_id
@@ -235,7 +263,16 @@ class MeshtasticMQTTClient:
                     channel_id=channel_id
                 )
 
-                print(f"\n{self.formatter.format_encrypted_failure(packet_info, encrypted_data)}\n")
+                # If raw dump was requested, print it first, then the failure block
+                failure = self.formatter.format_encrypted_failure(packet_info, encrypted_data)
+                if raw_dump_text:
+                    # Remove leading '=' line from failure to keep a single separator
+                    first_nl = failure.find('\n')
+                    if first_nl != -1 and failure[:first_nl] == ("=" * SEPARATOR_WIDTH):
+                        failure = failure[first_nl+1:]
+                    print(f"\n{raw_dump_text}\n{failure}\n")
+                else:
+                    print(f"\n{failure}\n")
                 return
 
         parsed_msg = self.parser.create_parsed_message(msg, service_envelope, packet, data)
@@ -250,7 +287,45 @@ class MeshtasticMQTTClient:
                 logger.debug(f"Filtered out {portnum_name}")
                 return
 
-        print(f"\n{self.formatter.format_message(parsed_msg)}\n")
+        # If this is a text message that looks like raw 'Salted__' bytes, try Base64-normalized decryption first,
+        # then fall back to bytes-based decrypt (for this test, we keep both paths available)
+        try:
+            from .models import TextMessage
+            if isinstance(parsed_msg.content, TextMessage) and parsed_msg.content.is_openssl_encrypted and parsed_msg.content.is_salted_base64 is False:
+                # The decoded payload bytes are available via decoded_payload_b64
+                import base64
+                if parsed_msg.decoded_payload_b64:
+                    payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
+                    # Normalize to Base64 and use Base64 decrypt path exclusively
+                    payload_b64 = base64.b64encode(payload_bytes).decode('ascii')
+                    decrypted = self.crypto.decrypt_openssl_salted(payload_b64)
+                    if decrypted:
+                        parsed_msg.content.text = decrypted
+                        parsed_msg.content.decrypted = True
+        except Exception:
+            pass
+
+        formatted = self.formatter.format_message(parsed_msg)
+        # If content is text and SALTED filtering applies, skip printing
+        try:
+            from .models import TextMessage
+            if isinstance(parsed_msg.content, TextMessage):
+                is_salted = getattr(parsed_msg.content, 'is_openssl_encrypted', False)
+                if self.message_filter.should_filter_salted(is_salted):
+                    logger.debug("Filtered out SALTED text message (decoded path)")
+                    return
+        except Exception:
+            pass
+        if raw_dump_text:
+            # The formatted block already has top+bottom '=' lines; we want exactly
+            # one separator between raw and formatted. Since raw ended with '=',
+            # strip the first line if it is a full-width '='.
+            first_newline = formatted.find('\n')
+            if first_newline != -1 and formatted[:first_newline] == ("=" * SEPARATOR_WIDTH):
+                formatted = formatted[first_newline+1:]
+            print(f"\n{raw_dump_text}\n{formatted}\n")
+        else:
+            print(f"\n{formatted}\n")
 
     def connect(self, use_listener_id: bool = False, subscribe: bool = True) -> bool:
         """
@@ -307,11 +382,27 @@ class MeshtasticMQTTClient:
                 self.client.subscribe(subscribe_topic, qos=1)
 
             self.subscribe_mode = subscribe
+            # Prepare optional fixed salt if provided (hex string to bytes) and iterations
+            fixed_salt = None
+            fs_hex = getattr(self.client_config, 'openssl_fixed_salt', None)
+            if fs_hex:
+                try:
+                    fixed_salt = bytes.fromhex(fs_hex)
+                except ValueError:
+                    fixed_salt = None
+            openssl_iters = getattr(self.client_config, 'openssl_pbkdf2_iter', 10000)
+
             self.publisher = MessagePublisher(
                 self.client,
                 self.node_config,
                 self.server_config,
-                self.crypto.channel_keys
+                self.crypto.channel_keys,
+                self.formatter.hex_dump,
+                self.formatter.hex_dump_colored,
+                self.crypto.openssl_password,
+                getattr(self.client_config, 'openssl_send_base64', False),
+                openssl_iters,
+                fixed_salt
             )
 
             return True
@@ -369,7 +460,7 @@ class MeshtasticMQTTClient:
 
         return result
 
-    def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3) -> bool:
+    def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3, randomize: bool = False) -> bool:
         """Send position to a specific node."""
         if not self.connected:
             print("Not connected to MQTT broker")
@@ -379,7 +470,7 @@ class MeshtasticMQTTClient:
             print("Publisher not initialized")
             return False
 
-        result = self.publisher.send_position_message(to_node_id, channel, hop_limit)
+        result = self.publisher.send_position_message(to_node_id, channel, hop_limit, randomize)
 
         if not self.subscribe_mode:
             self.client.loop(timeout=0.1)

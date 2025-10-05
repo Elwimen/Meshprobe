@@ -63,7 +63,7 @@ class MessageFormatter:
         Args:
             crypto_engine: Optional CryptoEngine for decrypting OpenSSL messages
             node_db: Optional NodeDatabase for displaying node names
-            hex_dump: Hex dump mode: 'encrypted', 'decrypted', or 'all' (None = disabled)
+            hex_dump: Hex dump mode: 'full', 'payload', 'encrypted', 'decrypted', or True for TX (None = disabled)
             hex_dump_colored: Use colored output in hex dump
         """
         self.crypto_engine = crypto_engine
@@ -116,19 +116,42 @@ class MessageFormatter:
             lines.append("Want ACK: Yes")
 
         lines.append(f"Packet ID: {parsed_msg.packet_info.packet_id_hex}")
+
+        # Show full ServiceEnvelope hex dump if enabled
+        if self.hex_dump == 'full' and parsed_msg.raw_service_envelope:
+            lines.append("─" * SEPARATOR_WIDTH)
+            lines.append(f"ServiceEnvelope ({len(parsed_msg.raw_service_envelope)} bytes):")
+            lines.append(hex_dump(parsed_msg.raw_service_envelope, use_color=self.hex_dump_colored))
+
         lines.append("─" * SEPARATOR_WIDTH)
 
         if parsed_msg.content:
-            lines.append(self._format_content(parsed_msg.content))
+            content_block = self._format_content(parsed_msg.content)
+            lines.append(content_block)
+            # If content is a raw SALTED text that failed to decrypt, append hex dump of payload
+            try:
+                from .models import TextMessage
+                if isinstance(parsed_msg.content, TextMessage) and parsed_msg.content.is_openssl_encrypted and parsed_msg.content.is_salted_base64 is False:
+                    # Only when decryption failed (no unlocked line present). Heuristic: content_block contains '🔒🧂 SALTED'
+                    if '🔒🧂 SALTED' in content_block and parsed_msg.decoded_payload_b64:
+                        import base64
+                        payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
+                        # Also show Base64 for easy copy/paste
+                        lines.append(f"Salted payload (base64): {parsed_msg.decoded_payload_b64}")
+                        lines.append("─" * SEPARATOR_WIDTH)
+                        lines.append(f"Salted payload ({len(payload_bytes)} bytes):")
+                        lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
+            except Exception:
+                pass
         else:
             lines.append("Unable to decode message")
 
         # Show hex dump for decrypted payloads if enabled
-        if self.hex_dump in ('decrypted', 'all') and parsed_msg.decoded_payload_b64:
+        if self.hex_dump in ('decrypted', 'payload') and parsed_msg.decoded_payload_b64:
             import base64
             payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
             lines.append("─" * SEPARATOR_WIDTH)
-            lines.append(f"Raw payload ({len(payload_bytes)} bytes):")
+            lines.append(f"Decrypted payload ({len(payload_bytes)} bytes):")
             lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
 
         lines.append("=" * SEPARATOR_WIDTH)
@@ -160,12 +183,43 @@ class MessageFormatter:
         """Format text message."""
         lines = ["💬 TEXT MESSAGE"]
 
+        # If upstream decryption already succeeded, trust that result
+        if getattr(msg, 'decrypted', False):
+            lines.append(f"   🔓🧂 SALTED: {msg.text}")
+            return "\n".join(lines)
+
         if msg.is_openssl_encrypted and self.crypto_engine:
-            decrypted = self.crypto_engine.decrypt_openssl_salted(msg.text)
-            if decrypted:
-                lines.append(f"   🔓 {decrypted}")
+            if msg.is_salted_base64 is True:
+                decrypted = self.crypto_engine.decrypt_openssl_salted(msg.text)
+            elif msg.is_salted_base64 is False:
+                # The payload was raw bytes starting with 'Salted__', but we only have
+                # the text string here for display. Attempt decryption from bytes via parser path
+                # is not directly available; instead, try to re-encode text losslessly if possible.
+                # Fall back to Base64 path if user pasted Base64-like text.
+                # Best-effort: since text was produced via UTF-8 replace, we cannot reconstruct bytes reliably.
+                # So we attempt to decode using the original payload through ParsedMessage flows elsewhere.
+                decrypted = None
             else:
-                lines.append(f"   🔒 {msg.text}")
+                decrypted = self.crypto_engine.decrypt_openssl_salted(msg.text)
+            if decrypted:
+                lines.append(f"   🔓🧂 SALTED: {decrypted}")
+            else:
+                # OpenSSL salted but we couldn't decrypt
+                if msg.is_salted_base64 is True:
+                    # Base64 form is safe to display
+                    lines.append(f"   🔒🧂 SALTED: {msg.text}")
+                else:
+                    # Raw Salted__ blob: do not print as text to avoid terminal issues
+                    lines.append("   🔒🧂 SALTED (binary):")
+                # If this was a raw Salted__ payload, also show a hex dump of the encrypted bytes
+                if msg.is_salted_base64 is False:
+                    try:
+                        import base64
+                        # We can access the payload bytes via the outer ParsedMessage decoded payload
+                        # This method receives only TextMessage, so rely on closure over parsed context via a hint
+                        # Instead, instruct caller to append payload dump if available through a callback.
+                    except Exception:
+                        pass
                 if self.crypto_engine.openssl_password:
                     lines.append("   (Failed to decrypt with provided password)")
                 else:
@@ -339,7 +393,7 @@ class MessageFormatter:
         lines.append(f"Packet ID: {packet_info.packet_id_hex}")
         lines.append("─" * SEPARATOR_WIDTH)
 
-        if self.hex_dump in ('encrypted', 'all') and encrypted_data:
+        if self.hex_dump in ('encrypted', 'payload') and encrypted_data:
             lines.append(f"🔒 Encrypted payload ({len(encrypted_data)} bytes):")
             lines.append(hex_dump(encrypted_data, use_color=self.hex_dump_colored))
         else:
