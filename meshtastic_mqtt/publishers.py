@@ -16,6 +16,8 @@ except ImportError as e:
 from .config import NodeConfig, ServerConfig
 from .crypto import CryptoEngine
 from .utils import parse_node_id
+from .hex_dump import hex_dump
+from .formatters import SEPARATOR_WIDTH
 
 # Environment field configuration for send_environment
 # Format: (field_name, protobuf_type, unit, display_name)
@@ -49,7 +51,9 @@ class MessagePublisher:
     """Publishes messages to Meshtastic MQTT broker."""
 
     def __init__(self, client: mqtt.Client, node_config: NodeConfig, server_config: ServerConfig,
-                 channel_keys: dict[str, bytes]):
+                 channel_keys: dict[str, bytes], hex_dump_mode=None, hex_dump_colored: bool = False,
+                 openssl_password: str | None = None, openssl_send_base64: bool = False,
+                 openssl_iterations: int = 10000, openssl_fixed_salt: bytes | None = None):
         """
         Initialize MessagePublisher.
 
@@ -58,11 +62,31 @@ class MessagePublisher:
             node_config: Node configuration
             server_config: Server configuration
             channel_keys: Dictionary of channel PSKs
+            hex_dump_mode: Enable hex dump for transmitted packets (True or string mode)
+            hex_dump_colored: Use colored output in hex dump
         """
         self.client = client
         self.node_config = node_config
         self.server_config = server_config
         self.channel_keys = channel_keys
+        self.hex_dump_mode = hex_dump_mode
+        self.hex_dump_colored = hex_dump_colored
+        self.openssl_password = openssl_password
+        self.openssl_send_base64 = openssl_send_base64
+        self.openssl_iterations = int(openssl_iterations) if openssl_iterations else 10000
+        self.openssl_fixed_salt = openssl_fixed_salt
+
+    def _print_hex_dump(self, payload: bytes, label: str = "Packet"):
+        """Print hex dump of payload if enabled."""
+        if not self.hex_dump_mode:
+            return
+
+        print(f"\n{'─' * SEPARATOR_WIDTH}")
+        print(f"{label} hex dump ({len(payload)} bytes):")
+        print(f"{'─' * SEPARATOR_WIDTH}")
+        dump = hex_dump(payload, use_color=self.hex_dump_colored)
+        print(dump)
+        print(f"{'─' * SEPARATOR_WIDTH}\n")
 
     def publish_map_position(self) -> bool:
         """Publish position to the mesh map using protobuf MapReport."""
@@ -90,6 +114,7 @@ class MessagePublisher:
         payload = service_envelope.SerializeToString()
 
         self._print_map_publish_info(base_lat, base_lon, base_alt, lat, lon, alt, region, modem_preset, len(payload))
+        self._print_hex_dump(payload, "MAP_REPORT ServiceEnvelope")
 
         result = self.client.publish(topic, payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
@@ -115,6 +140,8 @@ class MessagePublisher:
             print(f"{key}: {value}")
         print(f"Payload size: {len(payload)} bytes")
 
+        self._print_hex_dump(payload, f"{msg_type.upper()} ServiceEnvelope")
+
         result = self.client.publish(self._get_message_topic(), payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
@@ -124,20 +151,59 @@ class MessagePublisher:
         channel_name = self.node_config.get_channel_name(channel)
         channel_hash = self._get_channel_hash(channel)
 
-        mesh_packet = self._create_text_mesh_packet(text, to_node_num, channel_hash, hop_limit)
+        # Encrypt with OpenSSL salted format if password provided
+        if self.openssl_password:
+            try:
+                ce = CryptoEngine({}, self.openssl_password, self.openssl_iterations)
+                if self.openssl_send_base64:
+                    b64 = ce.encrypt_openssl_salted(text, output="base64", salt=self.openssl_fixed_salt)
+                    payload = b64.encode('utf-8')
+                else:
+                    payload = ce.encrypt_openssl_salted(text, output="bytes", salt=self.openssl_fixed_salt)
+                    # Debug: also show Base64 of raw Salted__ for easy comparison on receive
+                    try:
+                        import base64
+                        b64 = base64.b64encode(payload).decode('ascii')
+                        print(f"Salted payload (base64): {b64}")
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"Failed to OpenSSL-encrypt message: {e}")
+                return False
+        else:
+            payload = text.encode('utf-8')
+
+        mesh_packet = self._create_text_mesh_packet(payload, to_node_num, channel_hash, hop_limit)
         service_envelope = self._create_service_envelope(mesh_packet, channel_name)
 
         return self._publish_message(service_envelope, to_node_num, "text message", {"Message": text, "Channel": channel_name})
 
-    def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3) -> bool:
+    def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3, randomize: bool = False) -> bool:
         """Send position to a specific node."""
         to_node_num = parse_node_id(to_node_id)
 
-        position = self._create_position()
+        if randomize:
+            base_lat = self.node_config.position.latitude
+            base_lon = self.node_config.position.longitude
+            base_alt = self.node_config.position.altitude
+
+            # Use same randomization as map command
+            lat = random.gauss(base_lat, 0.025 / 3)
+            lon = random.gauss(base_lon, 0.025 / 3)
+            alt = random.gauss(base_alt, 50 / 3)
+
+            position = self._create_position_with_coords(lat, lon, int(alt))
+            details = {
+                "Position": f"{lat:.6f}, {lon:.6f}, {int(alt)}m",
+                "Base": f"{base_lat:.6f}, {base_lon:.6f}, {base_alt}m (randomized)"
+            }
+        else:
+            position = self._create_position()
+            details = {"Position": f"{self.node_config.position.latitude}, {self.node_config.position.longitude}"}
+
         mesh_packet = self._create_position_mesh_packet(position, to_node_num, 0, hop_limit)
         service_envelope = self._create_service_envelope(mesh_packet)
 
-        details = {"Position": f"{self.node_config.position.latitude}, {self.node_config.position.longitude}"}
         return self._publish_message(service_envelope, to_node_num, "position", details)
 
     def _randomize_position(self) -> tuple[float, float, float]:
@@ -222,12 +288,12 @@ class MessagePublisher:
             add_rx_time=True
         )
 
-    def _create_text_mesh_packet(self, text: str, to_node: int, channel_hash: int, hop_limit: int) -> mesh_pb2.MeshPacket:
-        """Create MeshPacket with text message."""
+    def _create_text_mesh_packet(self, payload: bytes, to_node: int, channel_hash: int, hop_limit: int) -> mesh_pb2.MeshPacket:
+        """Create MeshPacket with text message from bytes payload."""
         return self._create_base_mesh_packet(
             to_node=to_node,
             portnum=portnums_pb2.TEXT_MESSAGE_APP,
-            payload=text.encode('utf-8'),
+            payload=payload,
             channel_hash=channel_hash,
             hop_limit=hop_limit,
             want_ack=False
@@ -235,10 +301,18 @@ class MessagePublisher:
 
     def _create_position(self) -> mesh_pb2.Position:
         """Create Position protobuf from config."""
+        return self._create_position_with_coords(
+            self.node_config.position.latitude,
+            self.node_config.position.longitude,
+            self.node_config.position.altitude
+        )
+
+    def _create_position_with_coords(self, lat: float, lon: float, alt: int) -> mesh_pb2.Position:
+        """Create Position protobuf with specific coordinates."""
         position = mesh_pb2.Position()
-        position.latitude_i = int(self.node_config.position.latitude * 1e7)
-        position.longitude_i = int(self.node_config.position.longitude * 1e7)
-        position.altitude = self.node_config.position.altitude
+        position.latitude_i = int(lat * 1e7)
+        position.longitude_i = int(lon * 1e7)
+        position.altitude = alt
         position.time = int(time.time())
         return position
 
@@ -283,6 +357,8 @@ class MessagePublisher:
         print(f"Hardware: {self.node_config.hw_model}, Short name: {self.node_config.short_name}")
 
         payload = service_envelope.SerializeToString()
+        self._print_hex_dump(payload, "NODEINFO ServiceEnvelope")
+
         result = self.client.publish(self._get_message_topic(), payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
@@ -309,6 +385,8 @@ class MessagePublisher:
               f"Voltage {self.node_config.device_metrics.voltage}V")
 
         payload = service_envelope.SerializeToString()
+        self._print_hex_dump(payload, "TELEMETRY ServiceEnvelope")
+
         result = self.client.publish(self._get_message_topic(), payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
@@ -344,6 +422,8 @@ class MessagePublisher:
         print(f"Sending ENVIRONMENT: {', '.join(metrics) if metrics else 'No metrics set'}")
 
         payload = service_envelope.SerializeToString()
+        self._print_hex_dump(payload, "ENVIRONMENT ServiceEnvelope")
+
         result = self.client.publish(self._get_message_topic(), payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 

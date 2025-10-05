@@ -37,7 +37,8 @@ class CryptoEngine:
         0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01
     ])
 
-    def __init__(self, channel_keys: dict[str, bytes], openssl_password: Optional[str] = None):
+    def __init__(self, channel_keys: dict[str, bytes], openssl_password: Optional[str] = None,
+                 openssl_iterations: int = 10000):
         """
         Initialize CryptoEngine.
 
@@ -47,6 +48,7 @@ class CryptoEngine:
         """
         self.channel_keys = channel_keys if channel_keys else {"default": self.DEFAULT_PSK}
         self.openssl_password = openssl_password
+        self.openssl_iterations = int(openssl_iterations) if openssl_iterations else 10000
 
     @staticmethod
     def calculate_channel_hash(psk: bytes) -> int:
@@ -202,49 +204,79 @@ class CryptoEngine:
         print(f"Debug: encrypted_first_16={encrypted_data[:16].hex()}")
 
     def decrypt_openssl_salted(self, ciphertext_b64: str) -> Optional[str]:
-        """
-        Decrypt OpenSSL 'Salted__' format (AES-256-CBC with password).
+        """Decrypt OpenSSL 'Salted__' Base64 using PBKDF2-HMAC-SHA256.
 
-        Args:
-            ciphertext_b64: Base64-encoded ciphertext
-
-        Returns:
-            Decrypted plaintext or None if decryption fails
+        Tries AES-256-CBC first, then AES-128-CBC. No MD5 fallback.
         """
         if not self.openssl_password:
             logger.debug("No OpenSSL password configured, skipping OpenSSL decryption")
             return None
 
         try:
-            logger.debug("Attempting OpenSSL decryption")
             data = base64.b64decode(ciphertext_b64)
+        except Exception as e:
+            logger.debug(f"Base64 decode failed: {e}")
+            return None
 
+        return self._decrypt_openssl_common(data)
+
+    # Note: raw Salted__ blobs are normalized to Base64 before decryption.
+
+    def _decrypt_openssl_common(self, data: bytes) -> Optional[str]:
+        """Common OpenSSL salted decryption with PBKDF2; tries AES-256 then AES-128."""
+        try:
             if not data.startswith(b'Salted__'):
                 logger.debug("Data does not have 'Salted__' header")
+                return None
+
+            if len(data) < 16 + 16:
+                logger.debug("Data too short for Salted__ + salt + 1 block")
                 return None
 
             salt = data[8:16]
             ciphertext = data[16:]
 
-            try:
-                key, iv = self._derive_key_pbkdf2(salt)
-                logger.debug("Using PBKDF2 key derivation")
-            except Exception:
-                key, iv = self._derive_key_md5(salt)
-                logger.debug("Using MD5 key derivation")
+            if len(ciphertext) % 16 != 0:
+                logger.debug("Ciphertext length is not a multiple of 16")
+                return None
 
-            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
-            decryptor = cipher.decryptor()
-            plaintext_padded = decryptor.update(ciphertext) + decryptor.finalize()
+            # PBKDF2 key derivation (use configured iterations)
+            key_iv = self._pbkdf2_derive(self.openssl_password.encode('utf-8'), salt, self.openssl_iterations)
 
-            padding_len = plaintext_padded[-1]
-            plaintext = plaintext_padded[:-padding_len]
+            # Try AES-256-CBC first (32-byte key, 16-byte IV)
+            result = self._try_aes_cbc_decrypt(ciphertext, key_iv[:32], key_iv[32:48])
+            if result is not None:
+                return result
 
-            result = plaintext.decode('utf-8', errors='replace')
-            logger.debug(f"OpenSSL decryption successful, {len(result)} chars")
+            # Then try AES-128-CBC (use first 16 bytes as key, next 16 as IV)
+            result = self._try_aes_cbc_decrypt(ciphertext, key_iv[:16], key_iv[32:48])
             return result
         except Exception as e:
             logger.debug(f"OpenSSL decrypt failed: {e}")
+            return None
+
+    def _pbkdf2_derive(self, password: bytes, salt: bytes, iterations: int) -> bytes:
+        """Derive 48 bytes (32 key + 16 IV) via PBKDF2-HMAC-SHA256."""
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=48,
+            salt=salt,
+            iterations=int(iterations),
+            backend=default_backend()
+        )
+        return kdf.derive(password)
+
+    def _try_aes_cbc_decrypt(self, ciphertext: bytes, key: bytes, iv: bytes) -> Optional[str]:
+        try:
+            cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+            decryptor = cipher.decryptor()
+            plaintext_padded = decryptor.update(ciphertext) + decryptor.finalize()
+            pad = plaintext_padded[-1]
+            if pad == 0 or pad > 16:
+                return None
+            plaintext = plaintext_padded[:-pad]
+            return plaintext.decode('utf-8', errors='replace')
+        except Exception:
             return None
 
     def _derive_key_pbkdf2(self, salt: bytes) -> tuple[bytes, bytes]:
@@ -277,3 +309,56 @@ class CryptoEngine:
 
         ms = b''.join(m)
         return ms[:key_len], ms[key_len:key_len + iv_len]
+
+    def encrypt_openssl_salted(self, plaintext: str, password: Optional[str] = None, *,
+                               output: str = "base64", key_size: int = 256,
+                               iterations: Optional[int] = None, salt: Optional[bytes] = None) -> str | bytes:
+        """Encrypt text into OpenSSL 'Salted__' blob using PBKDF2-HMAC-SHA256.
+
+        Args:
+            plaintext: Text to encrypt
+            password: Password to use (falls back to configured)
+            output: 'base64' (default) or 'bytes'
+            key_size: 256 or 128 for AES key size
+            iterations: PBKDF2 iterations
+
+        Returns:
+            Base64 string if output='base64', otherwise raw bytes starting with b'Salted__'
+        """
+        pwd = password or self.openssl_password
+        if not pwd:
+            raise ValueError("OpenSSL password not provided for encryption")
+
+        import os
+        salt = salt or os.urandom(8)
+
+        # Derive 48 bytes (32 key + 16 iv) via PBKDF2 with custom iterations
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=48,
+            salt=salt,
+            iterations=int(iterations or self.openssl_iterations),
+            backend=default_backend()
+        )
+        key_iv = kdf.derive(pwd.encode('utf-8'))
+
+        if key_size == 256:
+            key = key_iv[:32]
+            iv = key_iv[32:48]
+        elif key_size == 128:
+            key = key_iv[:16]
+            iv = key_iv[32:48]
+        else:
+            raise ValueError("key_size must be 128 or 256")
+
+        # PKCS7 padding
+        data = plaintext.encode('utf-8')
+        pad_len = 16 - (len(data) % 16)
+        padded = data + bytes([pad_len]) * pad_len
+
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(padded) + encryptor.finalize()
+
+        blob = b"Salted__" + salt + ciphertext
+        return base64.b64encode(blob).decode('ascii') if output == "base64" else blob
