@@ -68,6 +68,21 @@ class MessageFilter:
 
         return False
 
+    def should_filter_salted(self, is_salted: bool) -> bool:
+        """Check if OpenSSL 'Salted__' text messages should be filtered."""
+        if not is_salted or not self.filter_types:
+            return False
+
+        include = self.filter_types.get('include', set())
+        exclude = self.filter_types.get('exclude', set())
+
+        if include and 'salted' not in include:
+            return True
+        if 'salted' in exclude:
+            return True
+
+        return False
+
     def should_filter_portnum(self, portnum_name: str) -> bool:
         """
         Check if a portnum should be filtered.

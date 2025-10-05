@@ -65,10 +65,34 @@ class EnvironmentMetrics:
 
 @dataclass
 class NodeConfig:
-    """Node configuration with computed node_num from node_id."""
-    node_id: str
-    long_name: str = "Simulated Node"
-    short_name: str = "SIM"
+    """
+    Node configuration with computed node_num from node_id.
+
+    Node ID Format and Constraints:
+    --------------------------------
+    Node IDs are transmitted as ASCII strings in the Meshtastic protocol,
+    not as binary integers. This uses more bandwidth but provides flexibility.
+
+    Size Limit: 16 bytes maximum (defined in mesh.options: *id max_size:16)
+
+    Common Formats:
+    - MAC-derived (default): !1337b4b3 (10 bytes: ! + 8 hex chars + null)
+    - Phone numbers: +16504442323 (12-13 bytes)
+    - Special IDs: ^all (broadcast), ^local (locally connected node) (4-6 bytes)
+
+    Bandwidth Cost:
+    - ASCII: !1337b4b3 = 9 bytes (21 31 33 33 37 62 34 62 33 in hex)
+    - Binary equivalent would be 4 bytes (13 37 b4 b3)
+
+    Trade-off: Uses >2x bandwidth for flexibility, human readability, and
+    support for multiple ID formats (MAC addresses, phone numbers, special IDs).
+
+    Note: The node_num field is automatically computed from node_id if it
+    starts with ! prefix (converts hex string to uint32).
+    """
+    node_id: str  # Max 16 bytes, see docstring for format details
+    long_name: str = "Simulated Node"  # Max 40 bytes (mesh.options)
+    short_name: str = "SIM"  # Max 5 bytes (mesh.options)
     channel: str = "LongFast"
     position: Position = field(default_factory=Position)
     device_metrics: DeviceMetrics = field(default_factory=DeviceMetrics)
@@ -83,11 +107,20 @@ class NodeConfig:
     channel_map: dict = field(default_factory=dict)  # Maps channel index to name
 
     def __post_init__(self):
-        """Calculate node_num from node_id if it starts with !"""
-        if self.node_id.startswith('!'):
-            self.node_num = int(self.node_id[1:], 16)
-        else:
-            raise ValueError("node_id must start with ! prefix")
+        """Calculate node_num from node_id and validate."""
+        from .utils import parse_node_id
+
+        # Validate and parse node_id
+        if not self.node_id.startswith('!'):
+            raise ValueError(
+                f"node_id must start with ! prefix in config. Got: '{self.node_id}'. "
+                f"Example: !1337b4b3"
+            )
+
+        try:
+            self.node_num = parse_node_id(self.node_id)
+        except ValueError as e:
+            raise ValueError(f"Invalid node_id in config: {e}") from e
 
         if isinstance(self.position, dict):
             position_data = {k: v for k, v in self.position.items() if not k.startswith('_')}
@@ -232,14 +265,16 @@ def create_default_configs(server_path: str = "server_config.json",
     node_config = {
         "node_id": {
             "id": "!12345678",
-            "_comment": "Node ID with ! prefix (num is calculated automatically)"
+            "_comment": "Node ID with ! prefix (num is calculated automatically). Max 16 bytes. Format: !<8 hex chars> for MAC-derived, +<phone> for phone numbers, or ^all/^local for special IDs. Transmitted as ASCII string in protobuf."
         },
         "channel": {
             "value": "LongFast",
             "_comment": "Channel name"
         },
         "long_name": "Simulated Node",
+        "_long_name_comment": "Max 40 bytes (mesh.options)",
         "short_name": "SIM",
+        "_short_name_comment": "Max 5 bytes, ideally 2 characters for tiny OLED screens (mesh.options)",
         "hw_model": {
             "value": 0,
             "_comment": {}
