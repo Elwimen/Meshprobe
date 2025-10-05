@@ -83,6 +83,18 @@ class MessageFilter:
 
         return False
 
+    @staticmethod
+    def is_salted_ascii(payload: bytes, text: str) -> bool:
+        """Detect SALTED in ASCII path: Base64 prefix or raw 'Salted__' header."""
+        if not payload:
+            return False
+        try:
+            if text.startswith('U2FsdGVk'):
+                return True
+        except Exception:
+            pass
+        return payload.startswith(b'Salted__')
+
     def should_filter_portnum(self, portnum_name: str) -> bool:
         """
         Check if a portnum should be filtered.
