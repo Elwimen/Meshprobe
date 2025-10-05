@@ -88,7 +88,9 @@ class MessageParser:
     def _parse_text_message(self, payload: bytes, from_node_hex: str = None, to_node_hex: str = None) -> TextMessage:
         """Parse text message payload."""
         text = payload.decode('utf-8', errors='replace')
-        is_encrypted = text.startswith('U2FsdGVk')
+        is_salted_b64 = text.startswith('U2FsdGVk')
+        is_salted_bytes = payload.startswith(b'Salted__')
+        is_encrypted = is_salted_b64 or is_salted_bytes
 
         # Log message to sender's node database
         if self.node_db is not None and from_node_hex:
@@ -112,7 +114,7 @@ class MessageParser:
                 to_node=to_node_hex
             )
 
-        return TextMessage(text=text, is_openssl_encrypted=is_encrypted)
+        return TextMessage(text=text, is_openssl_encrypted=is_encrypted, is_salted_base64=is_salted_b64 if is_encrypted else None)
 
     def _parse_position(self, payload: bytes, from_node_hex: str = None) -> Optional[PositionData]:
         """Parse position payload."""
@@ -374,5 +376,6 @@ class MessageParser:
             encrypted=packet.HasField('encrypted'),
             content=content,
             encrypted_payload_b64=encrypted_payload_b64,
-            decoded_payload_b64=decoded_payload_b64
+            decoded_payload_b64=decoded_payload_b64,
+            raw_service_envelope=msg.payload
         )
