@@ -83,6 +83,8 @@ def main():
                        help='Override MQTT root topic (e.g., msh/US, msh/EU_868)')
     if ARGCOMPLETE_AVAILABLE:
         root_topic_arg.completer = root_topic_completer
+    parser.add_argument('--psk', type=str,
+                       help='Override channel PSK (base64 encoded, e.g., AQ== or 1PG/OiApB1nwvP+rz05pAQ==)')
     parser.add_argument('--create-configs', action='store_true',
                        help='Create default configuration files')
     parser.add_argument('--log-level', default='CRITICAL',
@@ -193,6 +195,19 @@ def main():
     if args.root_topic:
         server_config.root_topic = args.root_topic
         print(f"Overriding root topic to: {args.root_topic}")
+
+    # Override PSK if provided via command line
+    if hasattr(args, 'psk') and args.psk:
+        import base64
+        try:
+            psk_bytes = base64.b64decode(args.psk)
+            # Override all channels with this PSK
+            for channel_name in node_config.channels:
+                node_config.channels[channel_name]['psk'] = args.psk
+            print(f"Overriding PSK for all channels ({len(psk_bytes)} bytes)")
+        except Exception as e:
+            print(f"Error: Invalid PSK base64: {e}")
+            sys.exit(1)
 
     openssl_password = None
     if hasattr(args, 'openssl_password'):
