@@ -87,6 +87,8 @@ def main():
                        help='Override channel PSK for all commands (base64 encoded, e.g., AQ== or 1PG/OiApB1nwvP+rz05pAQ==)')
     parser.add_argument('--channel', type=int, default=0,
                        help='Channel index for sending commands (default: 0)')
+    parser.add_argument('--hops', type=int, default=3,
+                       help='Hop limit for sending commands (default: 3)')
     parser.add_argument('--create-configs', action='store_true',
                        help='Create default configuration files')
     parser.add_argument('--log-level', default='CRITICAL',
@@ -106,7 +108,6 @@ def main():
     text_parser = subparsers.add_parser('text', help='Send text message to a node')
     text_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
     text_parser.add_argument('message', help='Message text')
-    text_parser.add_argument('--hops', type=int, default=3, help='Hop limit')
     text_parser.add_argument('--openssl-password', type=str,
                             help='Encrypt text with OpenSSL salted format (AES-256-CBC) using this password')
     text_parser.add_argument('--base64', action='store_true',
@@ -122,7 +123,6 @@ def main():
 
     pos_parser = subparsers.add_parser('position', help='Send position to a node')
     pos_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
-    pos_parser.add_argument('--hops', type=int, default=3, help='Hop limit')
     pos_parser.add_argument('--randomize', action='store_true',
                            help='Randomize position with Gaussian noise (±0.025°, similar to map command)')
     pos_parser.add_argument('--hex-dump', action='store_true',
@@ -305,12 +305,14 @@ def main():
         elif args.command == 'text':
             # openssl_password already attached to client/publisher in connect()
             channel = getattr(args, 'channel', 0)
-            client.send_text_message(args.message, args.to_node, channel, args.hops)
+            hops = getattr(args, 'hops', 3)
+            client.send_text_message(args.message, args.to_node, channel, hops)
             time.sleep(1)
         elif args.command == 'position':
             randomize = args.randomize if hasattr(args, 'randomize') else False
             channel = getattr(args, 'channel', 0)
-            client.send_position_message(args.to_node, channel, args.hops, randomize)
+            hops = getattr(args, 'hops', 3)
+            client.send_position_message(args.to_node, channel, hops, randomize)
             time.sleep(1)
         elif args.command == 'nodeinfo':
             client.send_node_info()
