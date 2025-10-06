@@ -51,7 +51,7 @@ class MessagePublisher:
     ]
 
     def __init__(self, client: mqtt.Client, node_config: NodeConfig, server_config: ServerConfig,
-                 channel_keys: dict[str, bytes], hex_dump_mode=None, hex_dump_colored: bool = False,
+                 crypto_engine: CryptoEngine, hex_dump_mode=None, hex_dump_colored: bool = False,
                  openssl_password: str | None = None, openssl_send_base64: bool = False,
                  openssl_iterations: int = 10000, openssl_fixed_salt: bytes | None = None):
         """
@@ -61,14 +61,15 @@ class MessagePublisher:
             client: MQTT client instance
             node_config: Node configuration
             server_config: Server configuration
-            channel_keys: Dictionary of channel PSKs
+            crypto_engine: CryptoEngine for encrypting messages
             hex_dump_mode: Enable hex dump for transmitted packets (True or string mode)
             hex_dump_colored: Use colored output in hex dump
         """
         self.client = client
         self.node_config = node_config
         self.server_config = server_config
-        self.channel_keys = channel_keys
+        self.crypto = crypto_engine
+        self.channel_keys = crypto_engine.channel_keys  # For backward compatibility
         self.hex_dump_mode = hex_dump_mode
         self.hex_dump_colored = hex_dump_colored
         self.openssl_password = openssl_password
@@ -173,7 +174,7 @@ class MessagePublisher:
         else:
             payload = text.encode('utf-8')
 
-        mesh_packet = self._create_text_mesh_packet(payload, to_node_num, channel_hash, hop_limit)
+        mesh_packet = self._create_text_mesh_packet(payload, to_node_num, channel_hash, hop_limit, channel_name)
         service_envelope = self._create_service_envelope(mesh_packet, channel_name)
 
         return self._publish_message(service_envelope, to_node_num, "text message", {"Message": text, "Channel": channel_name})
@@ -260,8 +261,9 @@ class MessagePublisher:
 
     def _create_base_mesh_packet(self, to_node: int, portnum: int, payload: bytes,
                                  channel_hash: int = 0, hop_limit: int = 3,
-                                 want_ack: bool = False, add_rx_time: bool = False) -> mesh_pb2.MeshPacket:
-        """Create base MeshPacket with common fields."""
+                                 want_ack: bool = False, add_rx_time: bool = False,
+                                 channel_name: str = None) -> mesh_pb2.MeshPacket:
+        """Create base MeshPacket with common fields and PSK encryption."""
         mesh_packet = mesh_pb2.MeshPacket()
         setattr(mesh_packet, 'from', self.node_config.node_num)
         mesh_packet.to = to_node
@@ -275,8 +277,30 @@ class MessagePublisher:
             mesh_packet.rx_time = int(time.time())
 
         mesh_packet.want_ack = want_ack
-        mesh_packet.decoded.portnum = portnum
-        mesh_packet.decoded.payload = payload
+
+        # Create Data protobuf
+        data = mesh_pb2.Data()
+        data.portnum = portnum
+        data.payload = payload
+        data_bytes = data.SerializeToString()
+
+        # Encrypt with PSK if we have a crypto engine and channel
+        if self.crypto and (channel_name or self.node_config.channel):
+            encrypted = self.crypto.encrypt_packet(
+                data_bytes,
+                mesh_packet.id,
+                self.node_config.node_num,
+                channel_name or self.node_config.channel
+            )
+            if encrypted:
+                mesh_packet.encrypted = encrypted
+            else:
+                # Fallback to plaintext if encryption fails
+                mesh_packet.decoded.CopyFrom(data)
+        else:
+            # No encryption available
+            mesh_packet.decoded.CopyFrom(data)
+
         return mesh_packet
 
     def _create_mesh_packet_for_map(self, map_report: mqtt_pb2.MapReport) -> mesh_pb2.MeshPacket:
@@ -288,7 +312,7 @@ class MessagePublisher:
             add_rx_time=True
         )
 
-    def _create_text_mesh_packet(self, payload: bytes, to_node: int, channel_hash: int, hop_limit: int) -> mesh_pb2.MeshPacket:
+    def _create_text_mesh_packet(self, payload: bytes, to_node: int, channel_hash: int, hop_limit: int, channel_name: str = None) -> mesh_pb2.MeshPacket:
         """Create MeshPacket with text message from bytes payload."""
         return self._create_base_mesh_packet(
             to_node=to_node,
@@ -296,7 +320,8 @@ class MessagePublisher:
             payload=payload,
             channel_hash=channel_hash,
             hop_limit=hop_limit,
-            want_ack=False
+            want_ack=False,
+            channel_name=channel_name
         )
 
     def _create_position(self) -> mesh_pb2.Position:

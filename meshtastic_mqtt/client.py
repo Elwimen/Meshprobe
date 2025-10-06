@@ -413,7 +413,7 @@ class MeshtasticMQTTClient:
                 self.client,
                 self.node_config,
                 self.server_config,
-                self.crypto.channel_keys,
+                self.crypto,
                 self.formatter.hex_dump,
                 self.formatter.hex_dump_colored,
                 self.crypto.openssl_password,

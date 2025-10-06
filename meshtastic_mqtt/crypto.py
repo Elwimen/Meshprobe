@@ -184,7 +184,7 @@ class CryptoEngine:
     @staticmethod
     def _build_nonce(packet_id: int, from_node: int) -> bytearray:
         """
-        Build 16-byte nonce for AES-CTR decryption.
+        Build 16-byte nonce for AES-CTR encryption/decryption.
 
         Nonce structure: packet_id (8 bytes LE) + from_node (4 bytes LE) + zeros (4 bytes)
         """
@@ -192,6 +192,39 @@ class CryptoEngine:
         nonce[0:8] = packet_id.to_bytes(8, byteorder='little')
         nonce[8:12] = from_node.to_bytes(4, byteorder='little')
         return nonce
+
+    def encrypt_packet(self, data_payload: bytes, packet_id: int, from_node: int, channel_id: str) -> Optional[bytes]:
+        """
+        Encrypt a Data payload using AES-CTR for Meshtastic.
+
+        Args:
+            data_payload: Serialized mesh_pb2.Data protobuf to encrypt
+            packet_id: Packet ID for nonce generation
+            from_node: Source node ID for nonce generation
+            channel_id: Channel ID to determine PSK
+
+        Returns:
+            Encrypted bytes or None if encryption fails
+        """
+        # Get the PSK for this channel
+        key = self.channel_keys.get(channel_id) or self.channel_keys.get('default')
+        if not key:
+            logger.error(f"No PSK found for channel '{channel_id}'")
+            return None
+
+        key = self._normalize_key_length(key)
+        nonce = self._build_nonce(packet_id, from_node)
+
+        try:
+            cipher = Cipher(algorithms.AES(key), modes.CTR(bytes(nonce)), backend=default_backend())
+            encryptor = cipher.encryptor()
+            encrypted = encryptor.update(data_payload) + encryptor.finalize()
+
+            logger.debug(f"Encrypted {len(data_payload)} bytes with channel '{channel_id}' PSK")
+            return encrypted
+        except Exception as e:
+            logger.error(f"Encryption failed: {e}")
+            return None
 
     @staticmethod
     def _print_debug_info(packet, nonce: bytearray, key: bytes, encrypted_data: bytes):
