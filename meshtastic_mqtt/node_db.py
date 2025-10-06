@@ -387,6 +387,15 @@ class NodeDatabase:
         """Return number of nodes in database."""
         return len(self.nodes)
 
+    def __enter__(self):
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager and ensure flush."""
+        self.shutdown()
+        return False
+
     @staticmethod
     def _get_timestamp() -> str:
         """Get current UTC timestamp in ISO format."""

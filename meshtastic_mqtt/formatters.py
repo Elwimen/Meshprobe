@@ -21,39 +21,39 @@ from .crypto import CryptoEngine
 from .node_db import NodeDatabase
 from .hex_dump import hex_dump
 
-# Message formatting width
-SEPARATOR_WIDTH = 68
-
-# Environment telemetry display configuration
-# Format: field_name: (display_name, format_spec, unit)
-ENV_DISPLAY_CONFIG = {
-    'temperature': ('Temperature', '.1f', '°C'),
-    'relative_humidity': ('Humidity', '.1f', '%'),
-    'barometric_pressure': ('Pressure', '.1f', ' hPa'),
-    'gas_resistance': ('Gas Resistance', '.0f', ' Ω'),
-    'voltage': ('Voltage', '.2f', ' V'),
-    'current': ('Current', '.1f', ' mA'),
-    'iaq': ('IAQ', 'd', ''),
-    'distance': ('Distance', '.1f', ' m'),
-    'lux': ('Lux', '.1f', ''),
-    'white_lux': ('White Lux', '.1f', ''),
-    'ir_lux': ('IR Lux', '.1f', ''),
-    'uv_lux': ('UV Lux', '.1f', ''),
-    'wind_direction': ('Wind Direction', 'd', '°'),
-    'wind_speed': ('Wind Speed', '.1f', ' m/s'),
-    'wind_gust': ('Wind Gust', '.1f', ' m/s'),
-    'wind_lull': ('Wind Lull', '.1f', ' m/s'),
-    'weight': ('Weight', '.1f', ' kg'),
-    'radiation': ('Radiation', '.1f', ' cpm'),
-    'rainfall_1h': ('Rainfall (1h)', '.1f', ' mm'),
-    'rainfall_24h': ('Rainfall (24h)', '.1f', ' mm'),
-    'soil_moisture': ('Soil Moisture', '.1f', '%'),
-    'soil_temperature': ('Soil Temperature', '.1f', '°C'),
-}
-
 
 class MessageFormatter:
     """Formatter for console output of Meshtastic messages."""
+
+    # Message formatting width
+    SEPARATOR_WIDTH = 68
+
+    # Environment telemetry display configuration
+    # Format: field_name: (display_name, format_spec, unit)
+    ENV_DISPLAY_CONFIG = {
+        'temperature': ('Temperature', '.1f', '°C'),
+        'relative_humidity': ('Humidity', '.1f', '%'),
+        'barometric_pressure': ('Pressure', '.1f', ' hPa'),
+        'gas_resistance': ('Gas Resistance', '.0f', ' Ω'),
+        'voltage': ('Voltage', '.2f', ' V'),
+        'current': ('Current', '.1f', ' mA'),
+        'iaq': ('IAQ', 'd', ''),
+        'distance': ('Distance', '.1f', ' m'),
+        'lux': ('Lux', '.1f', ''),
+        'white_lux': ('White Lux', '.1f', ''),
+        'ir_lux': ('IR Lux', '.1f', ''),
+        'uv_lux': ('UV Lux', '.1f', ''),
+        'wind_direction': ('Wind Direction', 'd', '°'),
+        'wind_speed': ('Wind Speed', '.1f', ' m/s'),
+        'wind_gust': ('Wind Gust', '.1f', ' m/s'),
+        'wind_lull': ('Wind Lull', '.1f', ' m/s'),
+        'weight': ('Weight', '.1f', ' kg'),
+        'radiation': ('Radiation', '.1f', ' cpm'),
+        'rainfall_1h': ('Rainfall (1h)', '.1f', ' mm'),
+        'rainfall_24h': ('Rainfall (24h)', '.1f', ' mm'),
+        'soil_moisture': ('Soil Moisture', '.1f', '%'),
+        'soil_temperature': ('Soil Temperature', '.1f', '°C'),
+    }
 
     def __init__(self, crypto_engine: Optional[CryptoEngine] = None, node_db: Optional[NodeDatabase] = None,
                  hex_dump: Optional[str] = None, hex_dump_colored: bool = False):
@@ -82,7 +82,7 @@ class MessageFormatter:
             Formatted string for console output
         """
         lines = []
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * self.SEPARATOR_WIDTH)
 
         # Add local receive timestamp
         receive_time = datetime.now()
@@ -119,11 +119,11 @@ class MessageFormatter:
 
         # Show full ServiceEnvelope hex dump if enabled
         if self.hex_dump == 'full' and parsed_msg.raw_service_envelope:
-            lines.append("─" * SEPARATOR_WIDTH)
+            lines.append("─" * self.SEPARATOR_WIDTH)
             lines.append(f"ServiceEnvelope ({len(parsed_msg.raw_service_envelope)} bytes):")
             lines.append(hex_dump(parsed_msg.raw_service_envelope, use_color=self.hex_dump_colored))
 
-        lines.append("─" * SEPARATOR_WIDTH)
+        lines.append("─" * self.SEPARATOR_WIDTH)
 
         if parsed_msg.content:
             content_block = self._format_content(parsed_msg.content)
@@ -138,7 +138,7 @@ class MessageFormatter:
                         payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
                         # Also show Base64 for easy copy/paste
                         lines.append(f"Salted payload (base64): {parsed_msg.decoded_payload_b64}")
-                        lines.append("─" * SEPARATOR_WIDTH)
+                        lines.append("─" * self.SEPARATOR_WIDTH)
                         lines.append(f"Salted payload ({len(payload_bytes)} bytes):")
                         lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
             except Exception:
@@ -150,11 +150,11 @@ class MessageFormatter:
         if self.hex_dump in ('decrypted', 'payload') and parsed_msg.decoded_payload_b64:
             import base64
             payload_bytes = base64.b64decode(parsed_msg.decoded_payload_b64)
-            lines.append("─" * SEPARATOR_WIDTH)
+            lines.append("─" * self.SEPARATOR_WIDTH)
             lines.append(f"Decrypted payload ({len(payload_bytes)} bytes):")
             lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
 
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * self.SEPARATOR_WIDTH)
         return "\n".join(lines)
 
     def _format_content(self, content) -> str:
@@ -295,7 +295,7 @@ class MessageFormatter:
         """Format environment telemetry."""
         lines = ["🌡️  ENVIRONMENT TELEMETRY"]
 
-        for field, (display_name, format_spec, unit) in ENV_DISPLAY_CONFIG.items():
+        for field, (display_name, format_spec, unit) in MessageFormatter.ENV_DISPLAY_CONFIG.items():
             value = getattr(telemetry, field, None)
 
             if value is None or value == 0:
@@ -352,9 +352,9 @@ class MessageFormatter:
     def format_statistics(stats: Statistics) -> str:
         """Format statistics summary."""
         lines = []
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * MessageFormatter.SEPARATOR_WIDTH)
         lines.append("STATISTICS SUMMARY")
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * MessageFormatter.SEPARATOR_WIDTH)
         lines.append(f"Total messages:       {stats.total_messages}")
         lines.append(f"Parse errors:         {stats.parse_errors}")
         lines.append(f"Successful decrypts:  {stats.successful_decrypts}")
@@ -369,7 +369,7 @@ class MessageFormatter:
             name_width = 20
             count_width = 5
             percent_width = 4  # "45%"
-            bar_width = SEPARATOR_WIDTH - name_width - count_width - percent_width - 5  # 5 for spaces
+            bar_width = MessageFormatter.SEPARATOR_WIDTH - name_width - count_width - percent_width - 5  # 5 for spaces
 
             for portnum_name, count in stats.get_sorted_portnums():
                 # Shorten portnum name if needed
@@ -382,16 +382,16 @@ class MessageFormatter:
 
                 lines.append(f"  {display_name:20s} {count:5d} {bar:<{bar_width}s} {percentage:3.0f}%")
 
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * MessageFormatter.SEPARATOR_WIDTH)
         return "\n".join(lines)
 
     def format_encrypted_failure(self, packet_info, encrypted_data: bytes = None) -> str:
         """Format message for failed decryption."""
         lines = []
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * self.SEPARATOR_WIDTH)
         lines.append(f"From: {packet_info.from_node_hex} → To: {packet_info.to_node_hex}")
         lines.append(f"Packet ID: {packet_info.packet_id_hex}")
-        lines.append("─" * SEPARATOR_WIDTH)
+        lines.append("─" * self.SEPARATOR_WIDTH)
 
         if self.hex_dump in ('encrypted', 'payload') and encrypted_data:
             lines.append(f"🔒 Encrypted payload ({len(encrypted_data)} bytes):")
@@ -399,5 +399,10 @@ class MessageFormatter:
         else:
             lines.append("🔒 ENCRYPTED (unable to decrypt)")
 
-        lines.append("=" * SEPARATOR_WIDTH)
+        lines.append("=" * self.SEPARATOR_WIDTH)
         return "\n".join(lines)
+
+
+# Backward compatibility module-level exports
+SEPARATOR_WIDTH = MessageFormatter.SEPARATOR_WIDTH
+ENV_DISPLAY_CONFIG = MessageFormatter.ENV_DISPLAY_CONFIG

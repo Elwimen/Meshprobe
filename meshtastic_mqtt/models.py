@@ -23,6 +23,10 @@ class PacketInfo:
     via_mqtt: bool
     want_ack: bool
 
+    def __str__(self) -> str:
+        """String representation of packet info."""
+        return f"{self.from_node_hex} → {self.to_node_hex} (ID: {self.packet_id_hex}, Hops: {self.hops_away}/{self.hop_start})"
+
 
 @dataclass
 class TextMessage:
@@ -150,6 +154,12 @@ class ParsedMessage:
     decoded_payload_b64: Optional[str] = None
     raw_service_envelope: Optional[bytes] = None
 
+    def __str__(self) -> str:
+        """String representation of parsed message."""
+        content_type = type(self.content).__name__ if self.content else "Unknown"
+        encrypted_str = " [ENCRYPTED]" if self.encrypted else ""
+        return f"{self.portnum_name} from {self.packet_info.from_node_hex} ({content_type}){encrypted_str}"
+
 
 @dataclass
 class Statistics:
@@ -160,6 +170,22 @@ class Statistics:
     parse_errors: int = 0
     portnum_counts: dict[str, int] = field(default_factory=dict)
 
+    @property
+    def success_rate(self) -> float:
+        """Calculate successful decryption rate."""
+        total_encrypts = self.successful_decrypts + self.failed_decrypts
+        if total_encrypts == 0:
+            return 0.0
+        return (self.successful_decrypts / total_encrypts) * 100
+
+    @property
+    def decrypt_rate(self) -> float:
+        """Calculate percentage of messages that were encrypted."""
+        if self.total_messages == 0:
+            return 0.0
+        total_encrypts = self.successful_decrypts + self.failed_decrypts
+        return (total_encrypts / self.total_messages) * 100
+
     def increment_portnum(self, portnum_name: str):
         """Increment counter for a specific portnum."""
         self.portnum_counts[portnum_name] = self.portnum_counts.get(portnum_name, 0) + 1
@@ -167,3 +193,9 @@ class Statistics:
     def get_sorted_portnums(self) -> list[tuple[str, int]]:
         """Get portnum counts sorted by frequency."""
         return sorted(self.portnum_counts.items(), key=lambda x: x[1], reverse=True)
+
+    def __str__(self) -> str:
+        """String representation of statistics."""
+        return (f"Stats: {self.total_messages} msgs, "
+                f"{self.successful_decrypts} decrypts ({self.success_rate:.1f}% success), "
+                f"{self.parse_errors} errors")

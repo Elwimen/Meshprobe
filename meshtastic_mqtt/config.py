@@ -3,18 +3,11 @@ Configuration dataclasses for Meshtastic MQTT client.
 """
 
 import json
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-
-def _extract_value(data: dict | str | int, key: str, default):
-    """Extract value from dict with 'value' key or return raw data."""
-    field_data = data.get(key, default) if isinstance(data, dict) else data
-    if isinstance(field_data, dict):
-        return field_data.get('value', default)
-    return field_data if field_data is not None else default
+from .exceptions import ConfigError
 
 
 @dataclass
@@ -106,6 +99,14 @@ class NodeConfig:
     channels: dict = field(default_factory=dict)
     channel_map: dict = field(default_factory=dict)  # Maps channel index to name
 
+    @staticmethod
+    def _extract_value(data: dict | str | int, key: str, default):
+        """Extract value from dict with 'value' key or return raw data."""
+        field_data = data.get(key, default) if isinstance(data, dict) else data
+        if isinstance(field_data, dict):
+            return field_data.get('value', default)
+        return field_data if field_data is not None else default
+
     def __post_init__(self):
         """Calculate node_num from node_id and validate."""
         from .utils import parse_node_id
@@ -157,12 +158,12 @@ class NodeConfig:
             node_id = node_id_data.get('id', '') if isinstance(node_id_data, dict) else node_id_data
 
             channel_data = data.get('channel', data.get('channel_id', {}))
-            channel = _extract_value(channel_data, 'value', 'LongFast')
+            channel = NodeConfig._extract_value(channel_data, 'value', 'LongFast')
 
-            hw_model = _extract_value(data, 'hw_model', 0)
-            role = _extract_value(data, 'role', 0)
-            region = _extract_value(data, 'region', 'UNSET')
-            modem_preset = _extract_value(data, 'modem_preset', 'LONG_FAST')
+            hw_model = NodeConfig._extract_value(data, 'hw_model', 0)
+            role = NodeConfig._extract_value(data, 'role', 0)
+            region = NodeConfig._extract_value(data, 'region', 'UNSET')
+            modem_preset = NodeConfig._extract_value(data, 'modem_preset', 'LONG_FAST')
 
             # Parse channel_map if available
             channel_map = {}
@@ -191,12 +192,10 @@ class NodeConfig:
                 channels=channels_data,
                 channel_map=channel_map,
             )
-        except FileNotFoundError:
-            print(f"Error: Config file not found: {path}")
-            sys.exit(1)
+        except FileNotFoundError as e:
+            raise ConfigError(f"Config file not found: {path}") from e
         except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON in {path}: {e}")
-            sys.exit(1)
+            raise ConfigError(f"Invalid JSON in {path}: {e}") from e
 
 
 @dataclass
@@ -216,8 +215,7 @@ class ClientConfig:
             # Return default config if file doesn't exist
             return cls()
         except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON in {path}: {e}")
-            sys.exit(1)
+            raise ConfigError(f"Invalid JSON in {path}: {e}") from e
 
 
 @dataclass
@@ -236,12 +234,10 @@ class ServerConfig:
             with open(path, 'r') as f:
                 data = json.load(f)
             return cls(**data)
-        except FileNotFoundError:
-            print(f"Error: Config file not found: {path}")
-            sys.exit(1)
+        except FileNotFoundError as e:
+            raise ConfigError(f"Config file not found: {path}") from e
         except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON in {path}: {e}")
-            sys.exit(1)
+            raise ConfigError(f"Invalid JSON in {path}: {e}") from e
 
 
 def create_default_configs(server_path: str = "server_config.json",

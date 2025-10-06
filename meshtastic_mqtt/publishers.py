@@ -19,36 +19,36 @@ from .utils import parse_node_id
 from .hex_dump import hex_dump
 from .formatters import SEPARATOR_WIDTH
 
-# Environment field configuration for send_environment
-# Format: (field_name, protobuf_type, unit, display_name)
-ENV_FIELD_CONFIG = [
-    ('temperature', float, '°C', 'Temp'),
-    ('relative_humidity', float, '%', 'Humidity'),
-    ('barometric_pressure', float, 'hPa', 'Pressure'),
-    ('gas_resistance', float, 'Ω', 'Gas'),
-    ('voltage', float, 'V', 'Volt'),
-    ('current', float, 'mA', 'Current'),
-    ('iaq', int, '', 'IAQ'),
-    ('distance', float, 'm', 'Distance'),
-    ('lux', float, '', 'Lux'),
-    ('white_lux', float, '', 'WhiteLux'),
-    ('ir_lux', float, '', 'IR'),
-    ('uv_lux', float, '', 'UV'),
-    ('wind_direction', int, '°', 'WindDir'),
-    ('wind_speed', float, 'm/s', 'WindSpeed'),
-    ('weight', float, 'kg', 'Weight'),
-    ('wind_gust', float, 'm/s', 'Gust'),
-    ('wind_lull', float, 'm/s', 'Lull'),
-    ('radiation', float, 'cpm', 'Radiation'),
-    ('rainfall_1h', float, 'mm', 'Rain1h'),
-    ('rainfall_24h', float, 'mm', 'Rain24h'),
-    ('soil_moisture', int, '%', 'SoilMoisture'),
-    ('soil_temperature', float, '°C', 'SoilTemp'),
-]
-
 
 class MessagePublisher:
     """Publishes messages to Meshtastic MQTT broker."""
+
+    # Environment field configuration for send_environment
+    # Format: (field_name, protobuf_type, unit, display_name)
+    ENV_FIELD_CONFIG = [
+        ('temperature', float, '°C', 'Temp'),
+        ('relative_humidity', float, '%', 'Humidity'),
+        ('barometric_pressure', float, 'hPa', 'Pressure'),
+        ('gas_resistance', float, 'Ω', 'Gas'),
+        ('voltage', float, 'V', 'Volt'),
+        ('current', float, 'mA', 'Current'),
+        ('iaq', int, '', 'IAQ'),
+        ('distance', float, 'm', 'Distance'),
+        ('lux', float, '', 'Lux'),
+        ('white_lux', float, '', 'WhiteLux'),
+        ('ir_lux', float, '', 'IR'),
+        ('uv_lux', float, '', 'UV'),
+        ('wind_direction', int, '°', 'WindDir'),
+        ('wind_speed', float, 'm/s', 'WindSpeed'),
+        ('weight', float, 'kg', 'Weight'),
+        ('wind_gust', float, 'm/s', 'Gust'),
+        ('wind_lull', float, 'm/s', 'Lull'),
+        ('radiation', float, 'cpm', 'Radiation'),
+        ('rainfall_1h', float, 'mm', 'Rain1h'),
+        ('rainfall_24h', float, 'mm', 'Rain24h'),
+        ('soil_moisture', int, '%', 'SoilMoisture'),
+        ('soil_temperature', float, '°C', 'SoilTemp'),
+    ]
 
     def __init__(self, client: mqtt.Client, node_config: NodeConfig, server_config: ServerConfig,
                  channel_keys: dict[str, bytes], hex_dump_mode=None, hex_dump_colored: bool = False,
@@ -398,7 +398,7 @@ class MessagePublisher:
         env = self.node_config.environment_metrics
         metrics = []
 
-        for field_name, field_type, unit, display_name in ENV_FIELD_CONFIG:
+        for field_name, field_type, unit, display_name in self.ENV_FIELD_CONFIG:
             value = getattr(env, field_name, None)
 
             # Skip zero or None values
@@ -444,3 +444,7 @@ class MessagePublisher:
         print(f"Role: {self.node_config.role}")
         print(f"Channel: {self.node_config.channel}, Default channel: {self.node_config.has_default_channel}")
         print(f"Payload size: {payload_size} bytes")
+
+
+# Backward compatibility module-level export
+ENV_FIELD_CONFIG = MessagePublisher.ENV_FIELD_CONFIG

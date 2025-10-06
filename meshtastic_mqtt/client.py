@@ -439,6 +439,15 @@ class MeshtasticMQTTClient:
         # Shutdown node database and flush pending writes
         self.node_db.shutdown()
 
+    def __enter__(self):
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager and disconnect."""
+        self.disconnect()
+        return False
+
     def print_stats(self):
         """Print statistics summary."""
         print(f"\n{self.formatter.format_statistics(self.stats)}\n")
