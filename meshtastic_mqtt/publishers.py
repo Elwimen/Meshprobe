@@ -125,7 +125,7 @@ class MessagePublisher:
         if channel != 0:
             return channel
         psk = self.channel_keys.get(self.node_config.channel) or self.channel_keys.get('default')
-        return CryptoEngine.calculate_channel_hash(psk)
+        return CryptoEngine.calculate_channel_hash(self.node_config.channel, psk)
 
     def _get_message_topic(self) -> str:
         """Get topic for sending messages."""

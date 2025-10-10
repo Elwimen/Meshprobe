@@ -240,7 +240,7 @@ class MeshtasticMQTTClient:
         if packet.HasField('decoded'):
             data = packet.decoded
         elif packet.HasField('encrypted'):
-            data = self.crypto.decrypt_packet(packet, channel_id, debug=False)
+            data = self.crypto.decrypt_packet(packet, channel_id)
             if data:
                 self.stats.successful_decrypts += 1
                 logger.debug("Successfully decrypted packet")
