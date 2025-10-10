@@ -132,7 +132,7 @@ class MessageLogger:
 
     def _write_to_file(self):
         """Write the message log to JSON file."""
-        with open(self.log_file, 'w') as f:
+        with open(self.log_file, 'w', encoding='utf-8') as f:
             json.dump(self.message_log, f, indent=2)
 
     def get_message_count(self) -> int:

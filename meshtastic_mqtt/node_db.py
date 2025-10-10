@@ -42,7 +42,7 @@ class NodeDatabase:
 
         for node_file in node_files:
             try:
-                with open(node_file, 'r') as f:
+                with open(node_file, 'r', encoding='utf-8') as f:
                     node_data = json.load(f)
                     node_id = node_data.get('node_id')
                     if node_id:
@@ -88,7 +88,7 @@ class NodeDatabase:
         node_file = self.nodes_dir / f"node_{safe_id}.json"
 
         try:
-            with open(node_file, 'w') as f:
+            with open(node_file, 'w', encoding='utf-8') as f:
                 json.dump(self.nodes[node_id], f, indent=2)
         except Exception as e:
             print(f"Error saving node {node_id}: {e}")

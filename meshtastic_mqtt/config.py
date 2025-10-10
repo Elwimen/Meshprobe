@@ -151,7 +151,7 @@ class NodeConfig:
     def from_json(cls, path: str | Path) -> 'NodeConfig':
         """Load NodeConfig from JSON file."""
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
             node_id_data = data.get('node_id', {})
@@ -208,7 +208,7 @@ class ClientConfig:
     def from_json(cls, path: str | Path) -> 'ClientConfig':
         """Load ClientConfig from JSON file."""
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return cls(**{k: v for k, v in data.items() if not k.startswith('_')})
         except FileNotFoundError:
@@ -231,7 +231,7 @@ class ServerConfig:
     def from_json(cls, path: str | Path) -> 'ServerConfig':
         """Load ServerConfig from JSON file."""
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             return cls(**data)
         except FileNotFoundError as e:
@@ -311,16 +311,16 @@ def create_default_configs(server_path: str = "server_config.json",
     node_path_obj = Path(node_path)
 
     if not client_path_obj.exists():
-        with open(client_path_obj, 'w') as f:
+        with open(client_path_obj, 'w', encoding='utf-8') as f:
             json.dump(client_config, f, indent=2)
         print(f"Created default client config: {client_path}")
 
     if not server_path_obj.exists():
-        with open(server_path_obj, 'w') as f:
+        with open(server_path_obj, 'w', encoding='utf-8') as f:
             json.dump(server_config, f, indent=2)
         print(f"Created default server config: {server_path}")
 
     if not node_path_obj.exists():
-        with open(node_path_obj, 'w') as f:
+        with open(node_path_obj, 'w', encoding='utf-8') as f:
             json.dump(node_config, f, indent=2)
         print(f"Created default node config: {node_path}")

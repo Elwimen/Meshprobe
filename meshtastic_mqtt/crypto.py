@@ -5,6 +5,7 @@ Handles AES-CTR decryption (Meshtastic packets) and AES-CBC decryption (OpenSSL)
 
 import base64
 import hashlib
+import os
 from typing import Optional
 
 try:
@@ -83,7 +84,7 @@ class CryptoEngine:
         for channel_name, psk in self.channel_keys.items():
             channel_hash = self.calculate_channel_hash(channel_name, psk)
             hash_map[channel_hash] = (channel_name, psk)
-            logger.debug(f"Channel '{channel_name}' -> hash 0x{channel_hash:02x}")
+            logger.debug("Channel '%s' -> hash 0x%02x", channel_name, channel_hash)
         return hash_map
 
     @staticmethod
@@ -122,30 +123,30 @@ class CryptoEngine:
             if len(psk_bytes) == 1:
                 if psk_bytes[0] == 0:
                     # Index 0 = no encryption, skip this channel
-                    logger.debug(f"Channel '{key}' has no encryption (PSK index 0), skipping")
+                    logger.debug("Channel '%s' has no encryption (PSK index 0), skipping", key)
                     continue
-                elif psk_bytes[0] == 1:
+                if psk_bytes[0] == 1:
                     # Index 1 = default PSK
                     psk_bytes = CryptoEngine.DEFAULT_PSK
-                    logger.debug(f"Channel '{key}' using default PSK (index 1)")
+                    logger.debug("Channel '%s' using default PSK (index 1)", key)
                 # else: treat as literal 1-byte PSK (will be zero-padded during encryption)
 
             # New format with index: {"0": {"name": "LongFast", "psk": "..."}}
             if key.isdigit() and 'name' in channel_config:
                 channel_name = channel_config['name']
                 keys[channel_name] = psk_bytes
-                logger.debug(f"Loaded channel {key} -> '{channel_name}'")
+                logger.debug("Loaded channel %s -> '%s'", key, channel_name)
             # Old format: {"LongFast": {"psk": "..."}}
             else:
                 keys[key] = psk_bytes
-                logger.debug(f"Loaded channel '{key}'")
+                logger.debug("Loaded channel '%s'", key)
 
         if not keys:
             keys["default"] = CryptoEngine.DEFAULT_PSK
 
         return keys
 
-    def decrypt_packet(self, packet, channel_id: str, debug: bool = False) -> Optional[mesh_pb2.Data]:
+    def decrypt_packet(self, packet, channel_id: str) -> Optional[mesh_pb2.Data]:
         """
         Decrypt an encrypted Meshtastic packet using AES-CTR.
         Uses the channel hash from the packet to lookup the correct PSK.
@@ -153,7 +154,6 @@ class CryptoEngine:
         Args:
             packet: MeshPacket protobuf with encrypted field and channel hash
             channel_id: Channel ID from MQTT topic (informational, not used for crypto)
-            debug: Enable debug output (deprecated, use logging instead)
 
         Returns:
             Decrypted Data protobuf or None if decryption fails
@@ -162,30 +162,31 @@ class CryptoEngine:
             return None
 
         channel_hash = packet.channel if hasattr(packet, 'channel') else 0
-        logger.debug(f"Decrypting packet with channel hash 0x{channel_hash:02x} (topic channel: '{channel_id}')")
+        logger.debug("Decrypting packet with channel hash 0x%02x (topic channel: '%s')",
+                    channel_hash, channel_id)
 
         # First try: Use channel hash to lookup the correct key
         if channel_hash in self.channel_hash_to_key:
             channel_name, key = self.channel_hash_to_key[channel_hash]
-            logger.debug(f"Found channel '{channel_name}' for hash 0x{channel_hash:02x}")
+            logger.debug("Found channel '%s' for hash 0x%02x", channel_name, channel_hash)
             result = self._try_decrypt_with_key(packet, key, channel_name)
             if result:
-                logger.debug(f"Successfully decrypted with '{channel_name}' key")
+                logger.debug("Successfully decrypted with '%s' key", channel_name)
                 return result
         else:
-            logger.debug(f"No channel found for hash 0x{channel_hash:02x}")
+            logger.debug("No channel found for hash 0x%02x", channel_hash)
 
         # Fallback: Try channel from topic
         key = self.channel_keys.get(channel_id)
         if key:
-            logger.debug(f"Trying topic channel key '{channel_id}'")
+            logger.debug("Trying topic channel key '%s'", channel_id)
             result = self._try_decrypt_with_key(packet, key, channel_id)
             if result:
-                logger.debug(f"Successfully decrypted with topic channel '{channel_id}' key")
+                logger.debug("Successfully decrypted with topic channel '%s' key", channel_id)
                 return result
 
         # Last resort: Try all keys
-        logger.debug(f"Hash/topic lookup failed, trying all {len(self.channel_keys)} available keys")
+        logger.debug("Hash/topic lookup failed, trying all %d available keys", len(self.channel_keys))
         for name, other_key in self.channel_keys.items():
             # Skip keys we already tried
             if channel_hash in self.channel_hash_to_key:
@@ -195,13 +196,13 @@ class CryptoEngine:
             if name == channel_id:
                 continue
 
-            logger.debug(f"Trying alternate key '{name}'")
+            logger.debug("Trying alternate key '%s'", name)
             result = self._try_decrypt_with_key(packet, other_key, name)
             if result:
-                logger.info(f"Successfully decrypted with '{name}' key (hash was 0x{channel_hash:02x})")
+                logger.info("Successfully decrypted with '%s' key (hash was 0x%02x)", name, channel_hash)
                 return result
 
-        logger.debug(f"Failed to decrypt with any of {len(self.channel_keys)} available keys")
+        logger.debug("Failed to decrypt with any of %d available keys", len(self.channel_keys))
         return None
 
     def _try_decrypt_with_key(self, packet, key: bytes, key_name: str) -> Optional[mesh_pb2.Data]:
@@ -225,13 +226,13 @@ class CryptoEngine:
             decryptor = cipher.decryptor()
             decrypted = decryptor.update(encrypted_data) + decryptor.finalize()
 
-            logger.debug(f"Key '{key_name}': decrypted {len(decrypted)} bytes")
+            logger.debug("Key '%s': decrypted %d bytes", key_name, len(decrypted))
 
             data = mesh_pb2.Data()
             data.ParseFromString(decrypted)
             return data
         except Exception as e:
-            logger.debug(f"Key '{key_name}' failed: {e}")
+            logger.debug("Key '%s' failed: %s", key_name, e)
             return None
 
     @staticmethod
@@ -275,7 +276,7 @@ class CryptoEngine:
         # Get the PSK for this channel
         key = self.channel_keys.get(channel_id) or self.channel_keys.get('default')
         if not key:
-            logger.error(f"No PSK found for channel '{channel_id}'")
+            logger.error("No PSK found for channel '%s'", channel_id)
             return None
 
         key = self._normalize_key_length(key)
@@ -286,10 +287,10 @@ class CryptoEngine:
             encryptor = cipher.encryptor()
             encrypted = encryptor.update(data_payload) + encryptor.finalize()
 
-            logger.debug(f"Encrypted {len(data_payload)} bytes with channel '{channel_id}' PSK")
+            logger.debug("Encrypted %d bytes with channel '%s' PSK", len(data_payload), channel_id)
             return encrypted
         except Exception as e:
-            logger.error(f"Encryption failed: {e}")
+            logger.error("Encryption failed: %s", e)
             return None
 
     @staticmethod
@@ -314,7 +315,7 @@ class CryptoEngine:
         try:
             data = base64.b64decode(ciphertext_b64)
         except Exception as e:
-            logger.debug(f"Base64 decode failed: {e}")
+            logger.debug("Base64 decode failed: %s", e)
             return None
 
         return self._decrypt_openssl_common(data)
@@ -351,7 +352,7 @@ class CryptoEngine:
             result = self._try_aes_cbc_decrypt(ciphertext, key_iv[:16], key_iv[32:48])
             return result
         except Exception as e:
-            logger.debug(f"OpenSSL decrypt failed: {e}")
+            logger.debug("OpenSSL decrypt failed: %s", e)
             return None
 
     def _pbkdf2_derive(self, password: bytes, salt: bytes, iterations: int) -> bytes:
@@ -428,7 +429,6 @@ class CryptoEngine:
         if not pwd:
             raise ValueError("OpenSSL password not provided for encryption")
 
-        import os
         salt = salt or os.urandom(8)
 
         # Derive 48 bytes (32 key + 16 iv) via PBKDF2 with custom iterations
