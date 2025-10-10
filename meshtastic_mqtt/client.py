@@ -141,13 +141,6 @@ class MeshtasticMQTTClient:
             print(f"{'=' * SEPARATOR_WIDTH}\n")
             return
 
-        if self._try_handle_direct_map_report(msg):
-            logger.debug("Handled as direct map report")
-            if raw_dump_text:
-                # Print raw first, then the map report which already includes separators
-                print(f"\n{raw_dump_text}")
-            return
-
         self._handle_service_envelope(msg, raw_dump_text)
 
     def _get_portnum_name(self, portnum: int) -> str:
@@ -165,51 +158,6 @@ class MeshtasticMQTTClient:
         except ValueError:
             logger.warning(f"Unknown portnum value: {portnum}")
             return f"UNKNOWN_PORTNUM_{portnum}"
-
-    def _try_handle_direct_map_report(self, msg) -> bool:
-        """Try to handle direct MAP REPORT messages on /map/ topics."""
-        topic_parts = msg.topic.split('/')
-
-        if len(topic_parts) < 5 or topic_parts[-2] != 'map':
-            return False
-
-        if not topic_parts[-1]:
-            return False
-
-        try:
-            map_report = mqtt_pb2.MapReport()
-            map_report.ParseFromString(msg.payload)
-
-            gateway_id = topic_parts[-1]
-            lat = map_report.latitude_i / 1e7
-            lon = map_report.longitude_i / 1e7
-
-            print(f"\n{'=' * SEPARATOR_WIDTH}")
-            print(f"Topic: {msg.topic}")
-            print(f"From: {gateway_id} → To: !ffffffff")
-            print(f"Gateway: {gateway_id}, Channel: unknown")
-            print(f"Packet ID: 0x00000000")
-            print(f"{'─' * SEPARATOR_WIDTH}")
-            print("🗺️  MAP REPORT")
-            print(f"   Long name:  {map_report.long_name}")
-            print(f"   Short name: {map_report.short_name}")
-            print(f"   Position:   {lat:.6f}, {lon:.6f}, {map_report.altitude}m")
-            print(f"   Firmware:   {map_report.firmware_version}")
-
-            if map_report.region:
-                from meshtastic import config_pb2
-                region_name = config_pb2.Config.LoRaConfig.RegionCode.Name(map_report.region)
-                print(f"   Region:     {region_name}")
-
-            if map_report.modem_preset:
-                from meshtastic import config_pb2
-                preset_name = config_pb2.Config.LoRaConfig.ModemPreset.Name(map_report.modem_preset)
-                print(f"   Modem:      {preset_name}")
-
-            print(f"{'=' * SEPARATOR_WIDTH}")
-            return True
-        except Exception:
-            return False
 
     def _handle_service_envelope(self, msg, raw_dump_text: str | None = None):
         """Handle ServiceEnvelope MQTT messages."""
