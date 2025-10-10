@@ -232,7 +232,8 @@ class MessageFormatter:
     @staticmethod
     def _format_position(pos: PositionData) -> str:
         """Format position data."""
-        lines = ["📍 POSITION"]
+        maps_url = f"https://www.google.com/maps?q={pos.latitude:.6f},{pos.longitude:.6f}"
+        lines = [f"📍 POSITION | {maps_url}"]
         lines.append(f"   Latitude:  {pos.latitude:.6f}°")
         lines.append(f"   Longitude: {pos.longitude:.6f}°")
         lines.append(f"   Altitude:  {pos.altitude}m")
@@ -334,7 +335,8 @@ class MessageFormatter:
     @staticmethod
     def _format_map_report(report: MapReport) -> str:
         """Format map report."""
-        lines = ["🗺️  MAP REPORT"]
+        maps_url = f"https://www.google.com/maps?q={report.latitude:.6f},{report.longitude:.6f}"
+        lines = [f"🗺️  MAP REPORT | {maps_url}"]
         lines.append(f"   Long name:  {report.long_name}")
         lines.append(f"   Short name: {report.short_name}")
         lines.append(f"   Position:   {report.latitude:.6f}, {report.longitude:.6f}, {report.altitude}m")
