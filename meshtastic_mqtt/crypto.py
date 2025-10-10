@@ -49,11 +49,42 @@ class CryptoEngine:
         self.channel_keys = channel_keys if channel_keys else {"default": self.DEFAULT_PSK}
         self.openssl_password = openssl_password
         self.openssl_iterations = int(openssl_iterations) if openssl_iterations else 10000
+        self.channel_hash_to_key = self._build_hash_map()
 
     @staticmethod
-    def calculate_channel_hash(psk: bytes) -> int:
-        """Calculate channel hash from PSK (first byte of SHA256)."""
-        return hashlib.sha256(psk).digest()[0]
+    def xor_hash(data: bytes) -> int:
+        """Calculate XOR hash of data (like firmware does)."""
+        code = 0
+        for byte in data:
+            code ^= byte
+        return code
+
+    @staticmethod
+    def calculate_channel_hash(channel_name: str, psk: bytes) -> int:
+        """
+        Calculate channel hash from channel name and PSK.
+        This matches the firmware implementation in Channels.cpp:generateHash()
+
+        Args:
+            channel_name: Channel name string
+            psk: Pre-shared key bytes
+
+        Returns:
+            Channel hash (0-255)
+        """
+        name_bytes = channel_name.encode('utf-8')
+        h = CryptoEngine.xor_hash(name_bytes)
+        h ^= CryptoEngine.xor_hash(psk)
+        return h & 0xFF
+
+    def _build_hash_map(self) -> dict[int, tuple[str, bytes]]:
+        """Build mapping from channel hash to (channel_name, psk)."""
+        hash_map = {}
+        for channel_name, psk in self.channel_keys.items():
+            channel_hash = self.calculate_channel_hash(channel_name, psk)
+            hash_map[channel_hash] = (channel_name, psk)
+            logger.debug(f"Channel '{channel_name}' -> hash 0x{channel_hash:02x}")
+        return hash_map
 
     @staticmethod
     def load_channel_keys(channels: dict) -> dict[str, bytes]:
@@ -62,6 +93,10 @@ class CryptoEngine:
         Supports both formats:
         - Old: {"LongFast": {"psk": "AQ=="}}
         - New: {"0": {"name": "LongFast", "psk": "AQ=="}}
+
+        Handles PSK index values (1-byte PSKs):
+        - 0x00: No encryption (empty PSK)
+        - 0x01: Use default Meshtastic PSK
 
         Args:
             channels: Dictionary of channel configurations
@@ -81,14 +116,28 @@ class CryptoEngine:
             if not psk_b64:
                 continue
 
+            psk_bytes = base64.b64decode(psk_b64)
+
+            # Handle PSK index values (firmware compatibility)
+            if len(psk_bytes) == 1:
+                if psk_bytes[0] == 0:
+                    # Index 0 = no encryption, skip this channel
+                    logger.debug(f"Channel '{key}' has no encryption (PSK index 0), skipping")
+                    continue
+                elif psk_bytes[0] == 1:
+                    # Index 1 = default PSK
+                    psk_bytes = CryptoEngine.DEFAULT_PSK
+                    logger.debug(f"Channel '{key}' using default PSK (index 1)")
+                # else: treat as literal 1-byte PSK (will be zero-padded during encryption)
+
             # New format with index: {"0": {"name": "LongFast", "psk": "..."}}
             if key.isdigit() and 'name' in channel_config:
                 channel_name = channel_config['name']
-                keys[channel_name] = base64.b64decode(psk_b64)
+                keys[channel_name] = psk_bytes
                 logger.debug(f"Loaded channel {key} -> '{channel_name}'")
             # Old format: {"LongFast": {"psk": "..."}}
             else:
-                keys[key] = base64.b64decode(psk_b64)
+                keys[key] = psk_bytes
                 logger.debug(f"Loaded channel '{key}'")
 
         if not keys:
@@ -99,11 +148,11 @@ class CryptoEngine:
     def decrypt_packet(self, packet, channel_id: str, debug: bool = False) -> Optional[mesh_pb2.Data]:
         """
         Decrypt an encrypted Meshtastic packet using AES-CTR.
-        Tries the specified channel key first, then all other keys if that fails.
+        Uses the channel hash from the packet to lookup the correct PSK.
 
         Args:
-            packet: MeshPacket protobuf with encrypted field
-            channel_id: Channel ID to determine PSK
+            packet: MeshPacket protobuf with encrypted field and channel hash
+            channel_id: Channel ID from MQTT topic (informational, not used for crypto)
             debug: Enable debug output (deprecated, use logging instead)
 
         Returns:
@@ -112,27 +161,44 @@ class CryptoEngine:
         if not packet.HasField('encrypted'):
             return None
 
-        logger.debug(f"Attempting to decrypt packet for channel '{channel_id}'")
+        channel_hash = packet.channel if hasattr(packet, 'channel') else 0
+        logger.debug(f"Decrypting packet with channel hash 0x{channel_hash:02x} (topic channel: '{channel_id}')")
 
-        # Try specified channel key first
-        key = self.channel_keys.get(channel_id) or self.channel_keys.get('default')
+        # First try: Use channel hash to lookup the correct key
+        if channel_hash in self.channel_hash_to_key:
+            channel_name, key = self.channel_hash_to_key[channel_hash]
+            logger.debug(f"Found channel '{channel_name}' for hash 0x{channel_hash:02x}")
+            result = self._try_decrypt_with_key(packet, key, channel_name)
+            if result:
+                logger.debug(f"Successfully decrypted with '{channel_name}' key")
+                return result
+        else:
+            logger.debug(f"No channel found for hash 0x{channel_hash:02x}")
+
+        # Fallback: Try channel from topic
+        key = self.channel_keys.get(channel_id)
         if key:
-            logger.debug(f"Trying primary key for channel '{channel_id}'")
+            logger.debug(f"Trying topic channel key '{channel_id}'")
             result = self._try_decrypt_with_key(packet, key, channel_id)
             if result:
-                logger.debug(f"Successfully decrypted with channel '{channel_id}' key")
+                logger.debug(f"Successfully decrypted with topic channel '{channel_id}' key")
                 return result
 
-        # Try all other keys
-        logger.debug(f"Primary key failed, trying all {len(self.channel_keys)} available keys")
+        # Last resort: Try all keys
+        logger.debug(f"Hash/topic lookup failed, trying all {len(self.channel_keys)} available keys")
         for name, other_key in self.channel_keys.items():
-            if name == channel_id or (channel_id not in self.channel_keys and name == 'default'):
-                continue  # Already tried this key
+            # Skip keys we already tried
+            if channel_hash in self.channel_hash_to_key:
+                tried_name, _ = self.channel_hash_to_key[channel_hash]
+                if name == tried_name:
+                    continue
+            if name == channel_id:
+                continue
 
             logger.debug(f"Trying alternate key '{name}'")
             result = self._try_decrypt_with_key(packet, other_key, name)
             if result:
-                logger.info(f"Successfully decrypted with '{name}' key (expected '{channel_id}')")
+                logger.info(f"Successfully decrypted with '{name}' key (hash was 0x{channel_hash:02x})")
                 return result
 
         logger.debug(f"Failed to decrypt with any of {len(self.channel_keys)} available keys")
