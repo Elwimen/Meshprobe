@@ -79,10 +79,10 @@ def main():
                        help='Path to server configuration file')
     parser.add_argument('--node-config', default='node_config.json',
                        help='Path to node configuration file')
-    root_topic_arg = parser.add_argument('--root-topic', type=str,
-                       help='Override MQTT root topic (e.g., msh/US, msh/EU_868)')
+    topic_arg = parser.add_argument('--topic', type=str,
+                       help='Override MQTT topic for both publish and listen (e.g., msh/US, msh/EU_868/+, msh/EU_868/#)')
     if ARGCOMPLETE_AVAILABLE:
-        root_topic_arg.completer = root_topic_completer
+        topic_arg.completer = root_topic_completer
     parser.add_argument('--psk', type=str,
                        help='Override channel PSK for all commands (base64 encoded, e.g., AQ== or 1PG/OiApB1nwvP+rz05pAQ==)')
     parser.add_argument('--channel', type=int, default=0,
@@ -192,9 +192,25 @@ def main():
     server_config = ServerConfig.from_json(args.server_config)
     node_config = NodeConfig.from_json(args.node_config)
 
-    if args.root_topic:
-        server_config.root_topic = args.root_topic
-        print(f"Overriding root topic to: {args.root_topic}")
+    if args.topic:
+        topic = args.topic
+        # For publishing: strip wildcards from the end
+        if topic.endswith('/#'):
+            publish_topic = topic[:-2]
+        elif topic.endswith('/+'):
+            publish_topic = topic[:-2]
+        else:
+            publish_topic = topic
+
+        # For listening: ensure wildcard is present
+        if not topic.endswith('/#') and not topic.endswith('/+'):
+            listen_topic = f"{topic}/+"
+        else:
+            listen_topic = topic
+
+        server_config.publish_topic = publish_topic
+        server_config.listen_topics = [listen_topic]
+        print(f"Overriding topic - Publish: {publish_topic}, Listen: {listen_topic}")
 
     # Override PSK if provided via command line
     if hasattr(args, 'psk') and args.psk:

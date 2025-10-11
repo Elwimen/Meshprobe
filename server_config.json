@@ -3,5 +3,12 @@
     "port": 1883,
     "username": "meshdev",
     "password": "large4cats",
-    "root_topic": "msh/EU_868/9A"
+    "topics": {
+        "publish": "msh/EU_868/9A",
+        "listen": [
+            "msh/EU_868/9A/#",
+            "msh/EU_868/HR/#",
+            "msh/EU_868/+"
+        ]
+    }
 }
