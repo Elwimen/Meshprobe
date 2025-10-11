@@ -75,6 +75,12 @@ class MeshtasticMQTTClient:
         if rc == 0:
             print(f"Connected to MQTT broker at {self.server_config.host}:{self.server_config.port}")
             self.connected = True
+
+            # Re-subscribe after reconnection
+            if self.subscribe_mode:
+                subscribe_topic = f"{self.server_config.root_topic}/#"
+                print(f"Subscribing to: {subscribe_topic}")
+                client.subscribe(subscribe_topic, qos=1)
         else:
             print(f"Failed to connect, return code {rc}")
             self.connected = False
