@@ -91,8 +91,7 @@ class MessagePublisher:
 
     def publish_map_position(self) -> bool:
         """Publish position to the mesh map using protobuf MapReport."""
-        root = self.server_config.root_topic
-        topic = f"{root}/2/map"
+        topic = f"{self.server_config.publish_topic}/2/map"
 
         base_lat = self.node_config.position.latitude
         base_lon = self.node_config.position.longitude
@@ -129,7 +128,7 @@ class MessagePublisher:
 
     def _get_message_topic(self) -> str:
         """Get topic for sending messages."""
-        return f"{self.server_config.root_topic}/2/e/{self.node_config.channel}/{self.node_config.node_id}"
+        return f"{self.server_config.publish_topic}/2/e/{self.node_config.channel}/{self.node_config.node_id}"
 
     def _publish_message(self, service_envelope: mqtt_pb2.ServiceEnvelope, to_node_num: int, msg_type: str, details: dict) -> bool:
         """Publish a message and print info."""
@@ -455,8 +454,7 @@ class MessagePublisher:
     def _print_map_publish_info(self, base_lat: float, base_lon: float, base_alt: float,
                                 lat: float, lon: float, alt: float, region: int, modem_preset: int, payload_size: int):
         """Print information about map position publish."""
-        root = self.server_config.root_topic
-        topic = f"{root}/2/map"
+        topic = f"{self.server_config.publish_topic}/2/map"
 
         print(f"Publishing map report to topic: {topic}")
         print(f"Node: {self.node_config.long_name} ({self.node_config.node_id})")
