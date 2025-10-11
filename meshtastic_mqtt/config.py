@@ -225,7 +225,8 @@ class ServerConfig:
     port: int = 1883
     username: str = "meshdev"
     password: str = "large4cats"
-    root_topic: str = "msh"
+    publish_topic: str = "msh/US"
+    listen_topics: list = field(default_factory=lambda: ["msh/US/#"])
 
     @classmethod
     def from_json(cls, path: str | Path) -> 'ServerConfig':
@@ -233,6 +234,23 @@ class ServerConfig:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+
+            # Parse new topics structure if present
+            if 'topics' in data:
+                topics = data['topics']
+                publish_topic = topics.get('publish', 'msh/US')
+                listen_topics = topics.get('listen', ['msh/US/#'])
+
+                return cls(
+                    host=data.get('host', 'mqtt.meshtastic.org'),
+                    port=data.get('port', 1883),
+                    username=data.get('username', 'meshdev'),
+                    password=data.get('password', 'large4cats'),
+                    publish_topic=publish_topic,
+                    listen_topics=listen_topics
+                )
+
+            # Fallback for backward compatibility (should not be used)
             return cls(**data)
         except FileNotFoundError as e:
             raise ConfigError(f"Config file not found: {path}") from e
@@ -255,7 +273,12 @@ def create_default_configs(server_path: str = "server_config.json",
         "port": 1883,
         "username": "meshdev",
         "password": "large4cats",
-        "root_topic": "msh"
+        "topics": {
+            "publish": "msh/US",
+            "listen": [
+                "msh/US/#"
+            ]
+        }
     }
 
     node_config = {
