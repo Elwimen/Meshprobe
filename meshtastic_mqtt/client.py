@@ -70,6 +70,12 @@ class MeshtasticMQTTClient:
 
         self.publisher: Optional[MessagePublisher] = None
 
+    def _subscribe_to_topics(self):
+        """Subscribe to all configured listen topics."""
+        for topic in self.server_config.listen_topics:
+            print(f"Subscribing to: {topic}")
+            self.client.subscribe(topic, qos=1)
+
     def on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
         if rc == 0:
@@ -78,9 +84,7 @@ class MeshtasticMQTTClient:
 
             # Re-subscribe after reconnection
             if self.subscribe_mode:
-                subscribe_topic = f"{self.server_config.root_topic}/#"
-                print(f"Subscribing to: {subscribe_topic}")
-                client.subscribe(subscribe_topic, qos=1)
+                self._subscribe_to_topics()
         else:
             print(f"Failed to connect, return code {rc}")
             self.connected = False
@@ -348,9 +352,7 @@ class MeshtasticMQTTClient:
                 return False
 
             if subscribe:
-                subscribe_topic = f"{self.server_config.root_topic}/#"
-                print(f"Subscribing to: {subscribe_topic}")
-                self.client.subscribe(subscribe_topic, qos=1)
+                self._subscribe_to_topics()
 
             self.subscribe_mode = subscribe
             # Prepare optional fixed salt if provided (hex string to bytes) and iterations
