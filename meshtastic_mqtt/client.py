@@ -509,3 +509,20 @@ class MeshtasticMQTTClient:
             self.client.loop(timeout=0.1)
 
         return result
+
+    def send_neighbor_info(self, neighbors_file: str) -> bool:
+        """Broadcast NEIGHBORINFO from JSON file."""
+        if not self.connected:
+            print("Not connected to MQTT broker")
+            return False
+
+        if not self.publisher:
+            print("Publisher not initialized")
+            return False
+
+        result = self.publisher.send_neighbor_info(neighbors_file)
+
+        if not self.subscribe_mode:
+            self.client.loop(timeout=0.1)
+
+        return result

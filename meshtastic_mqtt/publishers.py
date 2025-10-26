@@ -451,6 +451,58 @@ class MessagePublisher:
         result = self.client.publish(self._get_message_topic(), payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
+    def send_neighbor_info(self, neighbors_file: str) -> bool:
+        """Send NEIGHBORINFO packet from JSON file."""
+        import json
+        from pathlib import Path
+
+        # Load neighbor data from JSON file
+        try:
+            with open(neighbors_file, 'r') as f:
+                neighbor_data = json.load(f)
+        except FileNotFoundError:
+            print(f"Error: Neighbors file not found: {neighbors_file}")
+            return False
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in {neighbors_file}: {e}")
+            return False
+
+        # Create NeighborInfo protobuf message
+        neighbor_info = mesh_pb2.NeighborInfo()
+        neighbor_info.node_id = parse_node_id(self.node_config.node_id)
+        neighbor_info.last_sent_by_id = neighbor_info.node_id
+        neighbor_info.node_broadcast_interval_secs = neighbor_data.get('node_broadcast_interval_secs', 900)
+
+        # Add neighbors
+        for nbr_data in neighbor_data.get('neighbors', []):
+            neighbor = neighbor_info.neighbors.add()
+            neighbor.node_id = parse_node_id(nbr_data['node_id'])
+            neighbor.snr = float(nbr_data.get('snr', 0))
+            neighbor.node_broadcast_interval_secs = nbr_data.get('node_broadcast_interval_secs', 900)
+            # last_rx_time is optional, set to current time if not provided
+            neighbor.last_rx_time = int(nbr_data.get('last_rx_time', time.time()))
+
+        # Create mesh packet
+        mesh_packet = self._create_base_mesh_packet(
+            to_node=0xFFFFFFFF,
+            portnum=portnums_pb2.NEIGHBORINFO_APP,
+            payload=neighbor_info.SerializeToString(),
+            hop_limit=3
+        )
+        service_envelope = self._create_service_envelope(mesh_packet)
+
+        print(f"Sending NEIGHBORINFO for {self.node_config.node_id}")
+        print(f"Broadcast interval: {neighbor_info.node_broadcast_interval_secs}s")
+        print(f"Neighbors: {len(neighbor_info.neighbors)}")
+        for nbr in neighbor_info.neighbors:
+            print(f"  - !{nbr.node_id:08x} (SNR: {nbr.snr:.1f} dB)")
+
+        payload = service_envelope.SerializeToString()
+        self._print_hex_dump(payload, "NEIGHBORINFO ServiceEnvelope")
+
+        result = self.client.publish(self._get_message_topic(), payload, qos=0)
+        return result.rc == mqtt.MQTT_ERR_SUCCESS
+
     def _print_map_publish_info(self, base_lat: float, base_lon: float, base_alt: float,
                                 lat: float, lon: float, alt: float, region: int, modem_preset: int, payload_size: int):
         """Print information about map position publish."""
