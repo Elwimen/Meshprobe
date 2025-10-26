@@ -14,9 +14,16 @@ try:
 except ImportError:
     ARGCOMPLETE_AVAILABLE = False
 
-from meshtastic_mqtt import MeshtasticMQTTClient
-from meshtastic_mqtt.config import ServerConfig, NodeConfig, ClientConfig, create_default_configs
-from meshtastic_mqtt.logging_config import setup_logging
+try:
+    # Try relative import first (when run as module)
+    from .meshtastic_mqtt import MeshtasticMQTTClient
+    from .meshtastic_mqtt.config import ServerConfig, NodeConfig, ClientConfig, create_default_configs
+    from .meshtastic_mqtt.logging_config import setup_logging
+except ImportError:
+    # Fall back to absolute import (when run as script)
+    from meshtastic_mqtt import MeshtasticMQTTClient
+    from meshtastic_mqtt.config import ServerConfig, NodeConfig, ClientConfig, create_default_configs
+    from meshtastic_mqtt.logging_config import setup_logging
 
 
 def root_topic_completer(prefix, parsed_args, **kwargs):
@@ -164,6 +171,14 @@ def main():
                                      help='Show hex/ASCII dump of transmitted packets')
     telemetry_env_parser.add_argument('--colored', action='store_true',
                                      help='Use colored output in hex dump')
+
+    neighbor_parser = subparsers.add_parser('neighbor', help='Broadcast NEIGHBORINFO packet from JSON file')
+    neighbor_parser.add_argument('--file', default='neighbors.json',
+                                help='Path to neighbors JSON file (default: neighbors.json)')
+    neighbor_parser.add_argument('--hex-dump', action='store_true',
+                                help='Show hex/ASCII dump of transmitted packets')
+    neighbor_parser.add_argument('--colored', action='store_true',
+                                help='Use colored output in hex dump')
 
     if ARGCOMPLETE_AVAILABLE:
         argcomplete.autocomplete(parser)
@@ -338,6 +353,10 @@ def main():
             time.sleep(1)
         elif args.command == 'telemetry:env':
             client.send_environment()
+            time.sleep(1)
+        elif args.command == 'neighbor':
+            neighbors_file = getattr(args, 'file', 'neighbors.json')
+            client.send_neighbor_info(neighbors_file)
             time.sleep(1)
         elif args.command == 'listen':
             print("Listening for messages...")
