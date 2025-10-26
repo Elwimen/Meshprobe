@@ -12,6 +12,11 @@ decoded.log
 mqtt_messages.json
 nodes/
 
+# Local config files
+*_config.json
+neighbors.json
+*.backup.json
+
 # Virtual environment
 venv/
 env/
