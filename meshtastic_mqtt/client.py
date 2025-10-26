@@ -3,6 +3,7 @@ Main MQTT client for Meshtastic mesh networks.
 """
 
 import time
+import random
 from typing import Optional
 
 try:
@@ -299,6 +300,22 @@ class MeshtasticMQTTClient:
         else:
             print(f"\n{formatted}\n")
 
+    def _generate_client_id(self, use_random: bool = False) -> str:
+        """
+        Generate MQTT client ID.
+
+        Args:
+            use_random: Use randomized listener ID to avoid collisions
+
+        Returns:
+            Client ID string (e.g., !1337b4b3 or !a1b2c3d4)
+        """
+        if use_random:
+            # Generate random 8-character hex ID for listeners
+            rand_hex = ''.join(random.choices('0123456789abcdef', k=8))
+            return f"!{rand_hex}"
+        return self.node_config.node_id
+
     def connect(self, use_listener_id: bool = False, subscribe: bool = True) -> bool:
         """
         Connect to MQTT broker.
@@ -310,15 +327,7 @@ class MeshtasticMQTTClient:
         Returns:
             True if connected successfully, False otherwise
         """
-        if use_listener_id:
-            # Use a fully randomized listener client ID to avoid collisions
-            # and any association with the node ID. Keep it short but unique
-            # enough for MQTT brokers that have client ID length limits.
-            import uuid
-            rand = uuid.uuid4().hex[:8]
-            client_id = f"!{rand}"
-        else:
-            client_id = self.node_config.node_id
+        client_id = self._generate_client_id(use_listener_id)
 
         self.client = mqtt.Client(client_id=client_id)
         self.client.username_pw_set(self.server_config.username, self.server_config.password)
