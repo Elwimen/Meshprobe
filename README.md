@@ -1,67 +1,127 @@
-Meshtastic MQTT Tools
+# Meshprobe
 
-Small CLI toolkit to listen to, inspect, and publish Meshtastic packets over MQTT. It can:
-- Subscribe to a Meshtastic MQTT broker and pretty‑print messages (with optional hex dumps)
-- Send text, node info, telemetry, and position packets
-- Publish your current position to map topics
+CLI toolkit for probing, inspecting, and interacting with Meshtastic networks over MQTT.
 
-Requirements
+## Features
+
+- Listen to and decode Meshtastic MQTT traffic with hex dumps
+- Send text messages, positions, node info, and telemetry
+- Publish to map reporting topics
+- Decrypt packets with channel PSK or OpenSSL encryption
+- Filter and analyze specific packet types
+- Track and log node database locally
+
+## Requirements
+
 - Python 3.10+
-- Packages: `paho-mqtt`, `meshtastic` (protobufs), `argcomplete` (optional for tab completion)
+- Packages: `paho-mqtt`, `meshtastic` (protobufs)
+- Optional: `argcomplete` (for tab completion)
 
-Quick Start
-1) Create default configs in the repo directory:
-   `python3 mesh_client.py --create-configs`
-   This writes `server_config.json`, `node_config.json`, `client_config.json`.
-2) Edit `node_config.json:1` and set a valid node id (e.g., `"!da548c90"`). Optionally set channel PSKs in `channels`.
-3) Listen to messages (defaults to public broker in `server_config.json`):
-   `python3 mesh_client.py listen --duration 60`
+## Installation
 
-CLI Overview
-- Entry point: `mesh_client.py`
-- Configs: `server_config.json`, `node_config.json`, `client_config.json`
-- Root topic override: `--root-topic msh/US` (or other region)
-- PSK override for all channels: `--psk <base64>`
+```bash
+pip install paho-mqtt meshtastic argcomplete
+```
 
-Common Commands
-- Listen/inspect MQTT traffic:
-  `python3 mesh_client.py listen --hex-dump decrypted --colored --filter text,position`
-  Notes: `--hex-dump` supports `full|payload|encrypted|decrypted|raw`. Use `--filter`/`--filter-out` for types like `text,position,nodeinfo,telemetry,routing,neighbor,map,encrypted,ascii`.
+## Quick Start
 
-- Send text message:
-  `python3 mesh_client.py text @da548c90 "hello" --channel 0 --hops 3`
-  Optional OpenSSL SALTED encryption: `--openssl-password <pwd>`; PBKDF2 tuning: `--pbkdf2-iter 10000`; Base64 on‑air: `--base64`.
+1. Create default configs:
+   ```bash
+   python3 meshprobe.py --create-configs
+   # Or run as module:
+   python3 -m meshprobe --create-configs
+   ```
+   This creates `server_config.json`, `node_config.json`, and `client_config.json`.
 
-- Publish to map:
-  `python3 mesh_client.py map --hex-dump`
+2. Edit `node_config.json` and set a valid node ID (e.g., `"!da548c90"`). Optionally configure channel PSKs.
 
-- Send position to a node:
-  `python3 mesh_client.py position @da548c90 --randomize`
+3. Listen to messages:
+   ```bash
+   python3 meshprobe.py listen --duration 60
+   # Or run as module:
+   python3 -m meshprobe listen --duration 60
+   ```
 
-- Broadcast node info / telemetry:
-  `python3 mesh_client.py nodeinfo`
-  `python3 mesh_client.py telemetry`
-  `python3 mesh_client.py telemetry:env`
+## Usage
 
-Configuration
-- `server_config.json:1` Broker settings. Override at runtime with `--root-topic`.
-- `node_config.json:1` Node identity and defaults.
-  - `node_id` must start with `!` (e.g., `"!12345678"`). Max 16 ASCII bytes as per Meshtastic protocol.
-  - Channels: you can add per‑index items like `{ "0": { "name": "LongFast", "psk": "AQ==" } }`.
-- `client_config.json:1` Local behavior (node DB flush interval, `nodes/` dir).
+Meshprobe can be run in two ways:
+- As a script: `python3 meshprobe.py <command>`
+- As a module: `python3 -m meshprobe <command>`
 
-Hex Dumps and Decryption
-- Use `--hex-dump` to show raw/protobuf payloads. `--colored` enables ANSI colors.
-- For OpenSSL SALTED ASCII payloads, supply `--openssl-password`. You can adjust PBKDF2 iterations via `--pbkdf2-iter`.
+### Basic Commands
 
-Expected Output
-- On connect: confirmation plus subscribed topic. On listen, messages are grouped with clear separators, showing topic, from/to, channel, packet id, message type, and parsed content. Hex dumps appear between separator lines when enabled. A running summary (counts by type, decrypt success/fail) prints on exit.
+**Listen and inspect MQTT traffic:**
+```bash
+python3 meshprobe.py listen --hex-dump decrypted --colored --filter text,position
+```
 
-Tips
-- Tab completion is supported if `argcomplete` is installed; it provides suggestions for `--root-topic` and filters.
-- To use a different region, pass `--root-topic msh/<REGION>` (e.g., `msh/EU_868`).
-- To log node data, the tool writes to the `nodes/` directory as it sees traffic.
+Hex dump modes: `full`, `payload`, `encrypted`, `decrypted`, `raw`
+Filter types: `text`, `position`, `nodeinfo`, `telemetry`, `routing`, `neighbor`, `map`, `encrypted`, `ascii`
 
-Troubleshooting
-- Import error for `meshtastic` or `paho-mqtt`: `pip install meshtastic paho-mqtt`.
-- Connection failures: verify broker/credentials in `server_config.json:1` and network access to the MQTT host/port.
+**Send text message:**
+```bash
+python3 meshprobe.py text @da548c90 "hello" --channel 0 --hops 3
+```
+
+Optional encryption: `--openssl-password <pwd>`, `--pbkdf2-iter 10000`, `--base64`
+
+**Publish to map:**
+```bash
+python3 meshprobe.py map --hex-dump
+```
+
+**Send position:**
+```bash
+python3 meshprobe.py position @da548c90 --randomize
+```
+
+**Broadcast node info or telemetry:**
+```bash
+python3 meshprobe.py nodeinfo
+python3 meshprobe.py telemetry
+python3 meshprobe.py telemetry:env
+```
+
+### Global Options
+
+- `--root-topic msh/US` - Override MQTT root topic (e.g., `msh/EU_868`)
+- `--psk <base64>` - Override PSK for all channels
+
+## Configuration Files
+
+**`server_config.json`** - MQTT broker settings (host, port, credentials)
+
+**`node_config.json`** - Node identity and channel configuration
+- `node_id` must start with `!` (e.g., `"!12345678"`)
+- Define channels: `{ "0": { "name": "LongFast", "psk": "AQ==" } }`
+
+**`client_config.json`** - Local behavior (node DB flush interval, `nodes/` directory)
+
+## Output
+
+Messages display with clear separators showing:
+- MQTT topic
+- From/to node IDs
+- Channel and packet ID
+- Message type and parsed content
+- Optional hex dumps (when enabled)
+
+On exit, a summary shows packet counts by type and decryption success/failure statistics.
+
+## Tips
+
+- Tab completion is available with `argcomplete` for `--root-topic` and filter options
+- Node data is automatically logged to the `nodes/` directory
+- Use `--colored` for ANSI color output in hex dumps
+
+## Troubleshooting
+
+**Import errors:**
+```bash
+pip install meshtastic paho-mqtt
+```
+
+**Connection failures:**
+- Verify broker settings in `server_config.json`
+- Check network access to MQTT host/port
+- Ensure credentials are correct
