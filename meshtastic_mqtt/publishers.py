@@ -497,7 +497,9 @@ class MessagePublisher:
         )
         service_envelope = self._create_service_envelope(mesh_packet)
 
+        topic = self._get_message_topic()
         print(f"Sending NEIGHBORINFO for {self.node_config.node_id}")
+        print(f"Publishing to topic: {topic}")
         print(f"Broadcast interval: {neighbor_info.node_broadcast_interval_secs}s")
         print(f"Neighbors: {len(neighbor_info.neighbors)}")
         for nbr in neighbor_info.neighbors:
@@ -506,8 +508,6 @@ class MessagePublisher:
         payload = service_envelope.SerializeToString()
         self._print_hex_dump(payload, "NEIGHBORINFO ServiceEnvelope")
 
-        topic = self._get_message_topic()
-        print(f"Publishing to topic: {topic}")
         result = self.client.publish(topic, payload, qos=0)
 
         if result.rc == mqtt.MQTT_ERR_SUCCESS:
