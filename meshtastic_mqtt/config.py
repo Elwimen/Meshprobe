@@ -219,8 +219,73 @@ class ClientConfig:
 
 
 @dataclass
+class TopicsConfig:
+    """MQTT topics configuration."""
+    publish: str = "msh/US"
+    listen: list[str] = field(default_factory=lambda: ["msh/US/#"])
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TopicsConfig':
+        """Create TopicsConfig from dictionary."""
+        return cls(
+            publish=data.get('publish', 'msh/US'),
+            listen=data.get('listen', ['msh/US/#'])
+        )
+
+
+@dataclass
+class ServerProfile:
+    """Single MQTT server profile configuration."""
+    host: str
+    port: int
+    username: str
+    password: str
+    topics: TopicsConfig
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ServerProfile':
+        """Create ServerProfile from dictionary."""
+        topics_data = data.get('topics', {})
+        return cls(
+            host=data.get('host', 'mqtt.meshtastic.org'),
+            port=data.get('port', 1883),
+            username=data.get('username', 'meshdev'),
+            password=data.get('password', 'large4cats'),
+            topics=TopicsConfig.from_dict(topics_data)
+        )
+
+
+@dataclass
+class ServerConfigFile:
+    """Multi-server configuration file structure."""
+    default: str
+    servers: dict[str, ServerProfile]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ServerConfigFile':
+        """Create ServerConfigFile from dictionary."""
+        servers = {
+            name: ServerProfile.from_dict(server_data)
+            for name, server_data in data.get('servers', {}).items()
+        }
+        default = data.get('default', list(servers.keys())[0] if servers else 'local')
+        return cls(default=default, servers=servers)
+
+    def get_server(self, server_name: Optional[str] = None) -> ServerProfile:
+        """Get a server profile by name, or return the default."""
+        if server_name is None:
+            server_name = self.default
+
+        if server_name not in self.servers:
+            available = ', '.join(self.servers.keys())
+            raise ConfigError(f"Server '{server_name}' not found. Available: {available}")
+
+        return self.servers[server_name]
+
+
+@dataclass
 class ServerConfig:
-    """MQTT server configuration."""
+    """MQTT server configuration (legacy compatibility wrapper)."""
     host: str = "mqtt.meshtastic.org"
     port: int = 1883
     username: str = "meshdev"
@@ -229,29 +294,42 @@ class ServerConfig:
     listen_topics: list = field(default_factory=lambda: ["msh/US/#"])
 
     @classmethod
-    def from_json(cls, path: str | Path) -> 'ServerConfig':
-        """Load ServerConfig from JSON file."""
+    def from_server_profile(cls, profile: ServerProfile) -> 'ServerConfig':
+        """Create ServerConfig from ServerProfile."""
+        return cls(
+            host=profile.host,
+            port=profile.port,
+            username=profile.username,
+            password=profile.password,
+            publish_topic=profile.topics.publish,
+            listen_topics=profile.topics.listen
+        )
+
+    @classmethod
+    def from_json(cls, path: str | Path, server_name: Optional[str] = None) -> 'ServerConfig':
+        """
+        Load ServerConfig from JSON file.
+
+        Args:
+            path: Path to server config JSON file
+            server_name: Name of server profile to use (e.g., 'local', 'public')
+                        If None, uses 'default' key from config
+        """
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Parse new topics structure if present
-            if 'topics' in data:
-                topics = data['topics']
-                publish_topic = topics.get('publish', 'msh/US')
-                listen_topics = topics.get('listen', ['msh/US/#'])
+            # Multi-server format with dataclasses
+            if 'servers' in data:
+                config_file = ServerConfigFile.from_dict(data)
+                profile = config_file.get_server(server_name)
+                return cls.from_server_profile(profile)
 
-                return cls(
-                    host=data.get('host', 'mqtt.meshtastic.org'),
-                    port=data.get('port', 1883),
-                    username=data.get('username', 'meshdev'),
-                    password=data.get('password', 'large4cats'),
-                    publish_topic=publish_topic,
-                    listen_topics=listen_topics
-                )
-
-            # Fallback for backward compatibility (should not be used)
-            return cls(**data)
+            # No servers key found
+            raise ConfigError(
+                f"Invalid server config format. Expected 'servers' key with server profiles. "
+                f"See server_config.json for correct format."
+            )
         except FileNotFoundError as e:
             raise ConfigError(f"Config file not found: {path}") from e
         except json.JSONDecodeError as e:

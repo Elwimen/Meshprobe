@@ -1,14 +1,41 @@
 {
-    "host": "mqtt.meshtastic.org",
-    "port": 1883,
-    "username": "meshdev",
-    "password": "large4cats",
-    "topics": {
-        "publish": "msh/EU_868/9A",
-        "listen": [
-            "msh/EU_868/9A/#",
-            "msh/EU_868/HR/#",
-            "msh/EU_868/+"
-        ]
+    "default": "liam",
+    "servers": {
+        "local": {
+            "host": "192.168.1.218",
+            "port": 1883,
+            "username": "local",
+            "password": "local",
+            "topics": {
+                "publish": "msh/EU_868/9A",
+                "listen": [
+                    "msh/EU_868/9A/#"
+                ]
+            }
+        },
+        "public": {
+            "host": "mqtt.meshtastic.org",
+            "port": 1883,
+            "username": "meshdev",
+            "password": "large4cats",
+            "topics": {
+                "publish": "msh/EU_868/9A",
+                "listen": [
+                    "msh/EU_868/9A/#"
+                ]
+            }
+        },
+        "liam": {
+            "host": "mqtt.meshtastic.liamcottle.net",
+            "port": 1883,
+            "username": "uplink",
+            "password": "uplink",
+            "topics": {
+                "publish": "msh/EU_868/9A",
+                "listen": [
+                    "msh/EU_868/9A/#"
+                ]
+            }
+        }
     }
 }

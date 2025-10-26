@@ -84,6 +84,8 @@ def main():
                        help='Path to client configuration file')
     parser.add_argument('--server-config', default='server_config.json',
                        help='Path to server configuration file')
+    parser.add_argument('--server', type=str, default=None,
+                       help='Server profile to use (e.g., local, public). If not specified, uses default from config.')
     parser.add_argument('--node-config', default='node_config.json',
                        help='Path to node configuration file')
     topic_arg = parser.add_argument('--topic', type=str,
@@ -204,7 +206,7 @@ def main():
     setup_logging(args.log_level, module_levels, use_color_logging)
 
     client_config = ClientConfig.from_json(args.client_config)
-    server_config = ServerConfig.from_json(args.server_config)
+    server_config = ServerConfig.from_json(args.server_config, server_name=args.server)
     node_config = NodeConfig.from_json(args.node_config)
 
     if args.topic:
