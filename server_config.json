@@ -36,6 +36,18 @@
                     "msh/EU_868/9A/#"
                 ]
             }
+        },
+        "slovenia": {
+            "host": "mqtt.meshnet.si",
+            "port": 1883,
+            "username": "slovenia",
+            "password": "meshnet-si-slovenia",
+            "topics": {
+                "publish": "si/meshnet/slovenia",
+                "listen": [
+                    "si/meshnet/slovenia/#"
+                ]
+            }
         }
     }
 }

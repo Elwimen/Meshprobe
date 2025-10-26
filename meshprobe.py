@@ -7,6 +7,8 @@ Entry point for the refactored meshtastic_mqtt package.
 import sys
 import argparse
 import time
+import json
+from pathlib import Path
 
 try:
     import argcomplete
@@ -78,14 +80,28 @@ def filter_completer(prefix, parsed_args, **kwargs):
         return [t for t in valid_types if t.startswith(prefix)]
 
 
+def server_completer(prefix, parsed_args, **kwargs):
+    """Custom completer for --server with available server profiles."""
+    config_path = Path(getattr(parsed_args, 'server_config', 'server_config.json'))
+
+    try:
+        data = json.loads(config_path.read_text())
+        servers = data.get('servers', {})
+        return [name for name in servers if name.startswith(prefix)]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return []
+
+
 def main():
     parser = argparse.ArgumentParser(description='Meshtastic MQTT Client')
     parser.add_argument('--client-config', default='client_config.json',
                        help='Path to client configuration file')
     parser.add_argument('--server-config', default='server_config.json',
                        help='Path to server configuration file')
-    parser.add_argument('--server', type=str, default=None,
+    server_arg = parser.add_argument('--server', type=str, default=None,
                        help='Server profile to use (e.g., local, public). If not specified, uses default from config.')
+    if ARGCOMPLETE_AVAILABLE:
+        server_arg.completer = server_completer
     parser.add_argument('--node-config', default='node_config.json',
                        help='Path to node configuration file')
     topic_arg = parser.add_argument('--topic', type=str,
