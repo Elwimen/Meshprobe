@@ -506,7 +506,15 @@ class MessagePublisher:
         payload = service_envelope.SerializeToString()
         self._print_hex_dump(payload, "NEIGHBORINFO ServiceEnvelope")
 
-        result = self.client.publish(self._get_message_topic(), payload, qos=0)
+        topic = self._get_message_topic()
+        print(f"Publishing to topic: {topic}")
+        result = self.client.publish(topic, payload, qos=0)
+
+        if result.rc == mqtt.MQTT_ERR_SUCCESS:
+            print(f"✓ NEIGHBORINFO published successfully")
+        else:
+            print(f"✗ Failed to publish NEIGHBORINFO (error code: {result.rc})")
+
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
     def _print_map_publish_info(self, base_lat: float, base_lon: float, base_alt: float,
