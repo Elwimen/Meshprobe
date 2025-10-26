@@ -477,7 +477,13 @@ class MessagePublisher:
         for nbr_data in neighbor_data.get('neighbors', []):
             neighbor = neighbor_info.neighbors.add()
             neighbor.node_id = parse_node_id(nbr_data['node_id'])
-            neighbor.snr = float(nbr_data.get('snr', 0))
+
+            # Add 10% Gaussian randomization to SNR
+            base_snr = float(nbr_data.get('snr', 0))
+            std_dev = abs(base_snr) * 0.1  # 10% of base SNR
+            randomized_snr = random.gauss(base_snr, std_dev)
+            neighbor.snr = randomized_snr
+
             neighbor.node_broadcast_interval_secs = nbr_data.get('node_broadcast_interval_secs', 900)
             # last_rx_time is optional, set to current time if not provided
             neighbor.last_rx_time = int(nbr_data.get('last_rx_time', time.time()))
