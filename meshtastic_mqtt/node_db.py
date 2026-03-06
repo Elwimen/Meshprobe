@@ -109,8 +109,30 @@ class NodeDatabase:
             self._flush_thread.join(timeout=2.0)
         self.flush_dirty_nodes()
 
+    def get_public_key(self, node_id: str) -> Optional[bytes]:
+        """
+        Get stored X25519 public key for a node.
+
+        Args:
+            node_id: Node ID (e.g., "!da5ad5ac")
+
+        Returns:
+            Raw 32-byte public key, or None if not stored
+        """
+        node = self.nodes.get(node_id)
+        if not node:
+            return None
+        pub_b64 = node.get('public_key')
+        if not pub_b64:
+            return None
+        import base64
+        try:
+            return base64.b64decode(pub_b64)
+        except Exception:
+            return None
+
     def add_node(self, node_id: str, long_name: str = None, short_name: str = None,
-                 hw_model: int = None, macaddr: str = None):
+                 hw_model: int = None, macaddr: str = None, public_key: bytes = None):
         """
         Add or update node information.
 
@@ -148,6 +170,12 @@ class NodeDatabase:
         if macaddr is not None and node.get('macaddr') != macaddr:
             node['macaddr'] = macaddr
             changed = True
+        if public_key is not None:
+            import base64
+            pub_b64 = base64.b64encode(public_key).decode('ascii')
+            if node.get('public_key') != pub_b64:
+                node['public_key'] = pub_b64
+                changed = True
 
         if changed:
             self._update_node_timestamp(node, self._get_timestamp())

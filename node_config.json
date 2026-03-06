@@ -10,7 +10,7 @@
     "long_name": "AdventureTime",
     "short_name": "advt",
     "hw_model": {
-        "value": 16,
+        "value": 97,
         "_comment": {
             "0": "UNSET",
             "1": "TLORA_V2",
@@ -153,13 +153,17 @@
         "_comment": "Modem preset - LONG_FAST, LONG_SLOW, VERY_LONG_SLOW, MEDIUM_SLOW, MEDIUM_FAST, SHORT_SLOW, SHORT_FAST, LONG_MODERATE"
     },
     "has_default_channel": true,
+    "pki": {
+        "private_key": "YN9/dlgDyfPovXJ50Pelu/5ssID+khHGmjXiloNcSm8=",
+        "_comment": "X25519 private key (base64-encoded 32 bytes). Leave empty to auto-generate each run, or paste a persistent key here."
+    },
     "channels": {
         "0": {
             "name": "LongFast",
             "psk": "AQ=="
         },
         "1": {
-            "name": "CroMesh.eu",
+            "name": "cromesh.eu",
             "psk": "4b4RjGQ+jdXje3KUxDRg+aT9K1u76DuEWmQftXjcWR0="
         },
         "2": {

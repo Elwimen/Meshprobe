@@ -10,6 +10,9 @@ from typing import Optional
 
 try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.ciphers.aead import AESCCM
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     from cryptography.hazmat.primitives import hashes
@@ -39,17 +42,19 @@ class CryptoEngine:
     ])
 
     def __init__(self, channel_keys: dict[str, bytes], openssl_password: Optional[str] = None,
-                 openssl_iterations: int = 10000):
+                 openssl_iterations: int = 10000, private_key: Optional[bytes] = None):
         """
         Initialize CryptoEngine.
 
         Args:
             channel_keys: Dictionary mapping channel names to PSK bytes
             openssl_password: Optional password for OpenSSL-encrypted messages
+            private_key: Optional 32-byte X25519 private key for PKI DM encryption
         """
         self.channel_keys = channel_keys if channel_keys else {"default": self.DEFAULT_PSK}
         self.openssl_password = openssl_password
         self.openssl_iterations = int(openssl_iterations) if openssl_iterations else 10000
+        self.private_key = private_key
         self.channel_hash_to_key = self._build_hash_map()
 
     @staticmethod
@@ -291,6 +296,129 @@ class CryptoEngine:
             return encrypted
         except Exception as e:
             logger.error("Encryption failed: %s", e)
+            return None
+
+    @staticmethod
+    def generate_keypair() -> tuple[bytes, bytes]:
+        """
+        Generate a new X25519 keypair.
+
+        Returns:
+            (private_key_bytes, public_key_bytes) both as raw 32-byte values
+        """
+        private_key = X25519PrivateKey.generate()
+        private_bytes = private_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        public_bytes = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+        return private_bytes, public_bytes
+
+    @staticmethod
+    def derive_public_key(private_key_bytes: bytes) -> bytes:
+        """
+        Derive 32-byte X25519 public key from 32-byte private key.
+
+        Args:
+            private_key_bytes: Raw 32-byte private key
+
+        Returns:
+            Raw 32-byte public key
+        """
+        private_key = X25519PrivateKey.from_private_bytes(private_key_bytes)
+        return private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+
+    @staticmethod
+    def _pki_nonce(packet_id: int, from_node: int, extra_nonce: int) -> bytes:
+        """
+        Build 13-byte AES-CCM nonce matching firmware initNonce():
+          bytes [0:4]  = packet_id   (uint32 LE)
+          bytes [4:8]  = extra_nonce (uint32 LE)  — random per-packet value
+          bytes [8:12] = from_node   (uint32 LE)
+          byte  [12]   = 0x00
+        """
+        return (
+            packet_id.to_bytes(4, 'little') +
+            extra_nonce.to_bytes(4, 'little') +
+            from_node.to_bytes(4, 'little') +
+            b'\x00'
+        )
+
+    def encrypt_pki(self, data_bytes: bytes, packet_id: int, from_node: int,
+                    recipient_public_key: bytes) -> Optional[bytes]:
+        """
+        Encrypt using X25519 ECDH + SHA256 + AES-CCM matching firmware encryptCurve25519().
+
+        Output layout: [ciphertext][8-byte tag][4-byte extraNonce]  (12 bytes overhead total)
+        """
+        if not self.private_key:
+            logger.error("No private key configured for PKI encryption")
+            return None
+
+        try:
+            import os, struct
+            extra_nonce = struct.unpack('<I', os.urandom(4))[0]
+
+            private_key = X25519PrivateKey.from_private_bytes(self.private_key)
+            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+            pub_key = X25519PublicKey.from_public_bytes(recipient_public_key)
+            shared_secret = private_key.exchange(pub_key)
+
+            aes_key = hashlib.sha256(shared_secret).digest()
+            nonce = self._pki_nonce(packet_id, from_node, extra_nonce)
+
+            aesccm = AESCCM(aes_key, tag_length=8)
+            # encrypt() returns ciphertext+tag; append extraNonce after tag
+            return aesccm.encrypt(nonce, data_bytes, None) + struct.pack('<I', extra_nonce)
+        except Exception as e:
+            logger.error("PKI encryption failed: %s", e)
+            return None
+
+    def decrypt_pki(self, encrypted: bytes, packet_id: int, from_node: int,
+                    sender_public_key: bytes) -> Optional[mesh_pb2.Data]:
+        """
+        Decrypt using X25519 ECDH + SHA256 + AES-CCM matching firmware decryptCurve25519().
+
+        Input layout: [ciphertext][8-byte tag][4-byte extraNonce]
+        """
+        if not self.private_key:
+            logger.debug("No private key configured, cannot decrypt PKI packet")
+            return None
+
+        if len(encrypted) < 12:
+            logger.debug("PKI payload too short (%d bytes)", len(encrypted))
+            return None
+
+        try:
+            import struct
+            # Extract extraNonce from last 4 bytes, tag from preceding 8 bytes
+            extra_nonce = struct.unpack_from('<I', encrypted, len(encrypted) - 4)[0]
+            auth_tag = encrypted[-12:-4]
+            ciphertext = encrypted[:-12]
+
+            private_key = X25519PrivateKey.from_private_bytes(self.private_key)
+            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+            pub_key = X25519PublicKey.from_public_bytes(sender_public_key)
+            shared_secret = private_key.exchange(pub_key)
+
+            aes_key = hashlib.sha256(shared_secret).digest()
+            nonce = self._pki_nonce(packet_id, from_node, extra_nonce)
+
+            aesccm = AESCCM(aes_key, tag_length=8)
+            plaintext = aesccm.decrypt(nonce, ciphertext + auth_tag, None)
+
+            data = mesh_pb2.Data()
+            data.ParseFromString(plaintext)
+            return data
+        except Exception as e:
+            logger.debug("PKI decryption failed: %s", e)
             return None
 
     @staticmethod

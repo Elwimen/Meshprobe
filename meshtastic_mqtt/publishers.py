@@ -130,22 +130,25 @@ class MessagePublisher:
         """Get topic for sending messages."""
         return f"{self.server_config.publish_topic}/2/e/{self.node_config.channel}/{self.node_config.node_id}"
 
-    def _publish_message(self, service_envelope: mqtt_pb2.ServiceEnvelope, to_node_num: int, msg_type: str, details: dict) -> bool:
+    def _publish_message(self, service_envelope: mqtt_pb2.ServiceEnvelope, to_node_num: int, msg_type: str, details: dict,
+                         topic: str = None) -> bool:
         """Publish a message and print info."""
         payload = service_envelope.SerializeToString()
+        actual_topic = topic or self._get_message_topic()
 
         print(f"Sending {msg_type} to node !{to_node_num:08x} (decimal: {to_node_num})")
-        print(f"Topic: {self._get_message_topic()}")
+        print(f"Topic: {actual_topic}")
         for key, value in details.items():
             print(f"{key}: {value}")
         print(f"Payload size: {len(payload)} bytes")
 
         self._print_hex_dump(payload, f"{msg_type.upper()} ServiceEnvelope")
 
-        result = self.client.publish(self._get_message_topic(), payload, qos=0)
+        result = self.client.publish(actual_topic, payload, qos=0)
         return result.rc == mqtt.MQTT_ERR_SUCCESS
 
-    def send_text_message(self, text: str, to_node_id: str, channel: int = 0, hop_limit: int = 3) -> bool:
+    def send_text_message(self, text: str, to_node_id: str, channel: int = 0, hop_limit: int = 3,
+                          recipient_public_key: bytes = None) -> bool:
         """Send a text message to a specific node."""
         to_node_num = parse_node_id(to_node_id)
         channel_name = self.node_config.get_channel_name(channel)
@@ -173,10 +176,22 @@ class MessagePublisher:
         else:
             payload = text.encode('utf-8')
 
-        mesh_packet = self._create_text_mesh_packet(payload, to_node_num, channel_hash, hop_limit, channel_name)
-        service_envelope = self._create_service_envelope(mesh_packet, channel_name)
+        mesh_packet = self._create_text_mesh_packet(payload, to_node_num, channel_hash, hop_limit, channel_name,
+                                                    recipient_public_key=recipient_public_key)
 
-        return self._publish_message(service_envelope, to_node_num, "text message", {"Message": text, "Channel": channel_name})
+        if mesh_packet.pki_encrypted:
+            channel_id = "PKI"
+            topic = f"{self.server_config.publish_topic}/2/e/PKI/{self.node_config.node_id}"
+        else:
+            channel_id = channel_name
+            topic = None
+
+        service_envelope = self._create_service_envelope(mesh_packet, channel_id)
+
+        encryption_mode = "PKI" if mesh_packet.pki_encrypted else "PSK"
+        return self._publish_message(service_envelope, to_node_num, "text message",
+                                     {"Message": text, "Channel": channel_id, "Encryption": encryption_mode},
+                                     topic=topic)
 
     def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3, randomize: bool = False) -> bool:
         """Send position to a specific node."""
@@ -261,8 +276,10 @@ class MessagePublisher:
     def _create_base_mesh_packet(self, to_node: int, portnum: int, payload: bytes,
                                  channel_hash: int = 0, hop_limit: int = 3,
                                  want_ack: bool = False, add_rx_time: bool = False,
-                                 channel_name: str = None) -> mesh_pb2.MeshPacket:
-        """Create base MeshPacket with common fields and PSK encryption."""
+                                 channel_name: str = None,
+                                 recipient_public_key: bytes = None,
+                                 want_response: bool = False) -> mesh_pb2.MeshPacket:
+        """Create base MeshPacket with common fields and encryption (PKI or PSK)."""
         mesh_packet = mesh_pb2.MeshPacket()
         setattr(mesh_packet, 'from', self.node_config.node_num)
         mesh_packet.to = to_node
@@ -281,9 +298,26 @@ class MessagePublisher:
         data = mesh_pb2.Data()
         data.portnum = portnum
         data.payload = payload
+        if want_response:
+            data.want_response = True
         data_bytes = data.SerializeToString()
 
-        # Encrypt with PSK if we have a crypto engine and channel
+        # Use PKI encryption if recipient public key is known
+        if recipient_public_key and self.crypto and self.crypto.private_key:
+            encrypted = self.crypto.encrypt_pki(
+                data_bytes,
+                mesh_packet.id,
+                self.node_config.node_num,
+                recipient_public_key
+            )
+            if encrypted:
+                mesh_packet.encrypted = encrypted
+                mesh_packet.pki_encrypted = True
+                mesh_packet.public_key = self.node_config.get_public_key()
+                mesh_packet.channel = 0  # PKI DMs always use channel=0 per firmware convention
+                return mesh_packet
+
+        # Fallback: encrypt with PSK if we have a crypto engine and channel
         if self.crypto and (channel_name or self.node_config.channel):
             encrypted = self.crypto.encrypt_packet(
                 data_bytes,
@@ -294,10 +328,8 @@ class MessagePublisher:
             if encrypted:
                 mesh_packet.encrypted = encrypted
             else:
-                # Fallback to plaintext if encryption fails
                 mesh_packet.decoded.CopyFrom(data)
         else:
-            # No encryption available
             mesh_packet.decoded.CopyFrom(data)
 
         return mesh_packet
@@ -311,7 +343,8 @@ class MessagePublisher:
             add_rx_time=True
         )
 
-    def _create_text_mesh_packet(self, payload: bytes, to_node: int, channel_hash: int, hop_limit: int, channel_name: str = None) -> mesh_pb2.MeshPacket:
+    def _create_text_mesh_packet(self, payload: bytes, to_node: int, channel_hash: int, hop_limit: int,
+                                  channel_name: str = None, recipient_public_key: bytes = None) -> mesh_pb2.MeshPacket:
         """Create MeshPacket with text message from bytes payload."""
         return self._create_base_mesh_packet(
             to_node=to_node,
@@ -320,7 +353,8 @@ class MessagePublisher:
             channel_hash=channel_hash,
             hop_limit=hop_limit,
             want_ack=False,
-            channel_name=channel_name
+            channel_name=channel_name,
+            recipient_public_key=recipient_public_key
         )
 
     def _create_position(self) -> mesh_pb2.Position:
@@ -347,7 +381,7 @@ class MessagePublisher:
             to_node=to_node,
             portnum=portnums_pb2.POSITION_APP,
             payload=position.SerializeToString(),
-            channel_hash=channel_hash,
+            channel_hash=channel_hash or self._get_channel_hash(0),
             hop_limit=hop_limit,
             want_ack=False,
             add_rx_time=True
@@ -368,12 +402,17 @@ class MessagePublisher:
         user.long_name = self.node_config.long_name
         user.short_name = self.node_config.short_name
         user.hw_model = self.node_config.hw_model
+        pub_key = self.node_config.get_public_key()
+        if pub_key:
+            user.public_key = pub_key
 
         mesh_packet = self._create_base_mesh_packet(
             to_node=0xFFFFFFFF,
             portnum=portnums_pb2.NODEINFO_APP,
             payload=user.SerializeToString(),
-            hop_limit=3
+            channel_hash=self._get_channel_hash(0),
+            hop_limit=3,
+            want_response=True
         )
         service_envelope = self._create_service_envelope(mesh_packet)
 
@@ -401,6 +440,7 @@ class MessagePublisher:
             to_node=0xFFFFFFFF,
             portnum=portnums_pb2.TELEMETRY_APP,
             payload=telemetry.SerializeToString(),
+            channel_hash=self._get_channel_hash(0),
             hop_limit=3
         )
         service_envelope = self._create_service_envelope(mesh_packet)
@@ -439,6 +479,7 @@ class MessagePublisher:
             to_node=0xFFFFFFFF,
             portnum=portnums_pb2.TELEMETRY_APP,
             payload=telemetry.SerializeToString(),
+            channel_hash=self._get_channel_hash(0),
             hop_limit=3
         )
         service_envelope = self._create_service_envelope(mesh_packet)
@@ -493,6 +534,7 @@ class MessagePublisher:
             to_node=0xFFFFFFFF,
             portnum=portnums_pb2.NEIGHBORINFO_APP,
             payload=neighbor_info.SerializeToString(),
+            channel_hash=self._get_channel_hash(0),
             hop_limit=3
         )
         service_envelope = self._create_service_envelope(mesh_packet)

@@ -63,7 +63,8 @@ class MeshtasticMQTTClient:
         )
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)
         openssl_iters = getattr(client_config, 'openssl_pbkdf2_iter', 10000)
-        self.crypto = CryptoEngine(channel_keys, openssl_password, openssl_iterations=openssl_iters)
+        self.crypto = CryptoEngine(channel_keys, openssl_password, openssl_iterations=openssl_iters,
+                                   private_key=node_config._private_key_bytes)
         self.parser = MessageParser(self.node_db)
         self.formatter = MessageFormatter(self.crypto, self.node_db, hex_dump, hex_dump_colored)
         self.stats = Statistics()
@@ -198,6 +199,39 @@ class MeshtasticMQTTClient:
         data = None
         if packet.HasField('decoded'):
             data = packet.decoded
+        elif packet.pki_encrypted and packet.HasField('encrypted'):
+            from_node = getattr(packet, 'from')
+            is_our_packet = (from_node == self.node_config.node_num)
+
+            if is_our_packet:
+                # Our own outgoing DM reflected back — decrypt using recipient's public key
+                to_node_hex = f"!{packet.to:08x}"
+                sender_pub_key = self.node_db.get_public_key(to_node_hex)
+                if sender_pub_key:
+                    logger.debug(f"Own reflected PKI packet — using recipient {to_node_hex} key to decrypt")
+            else:
+                sender_pub_key = bytes(packet.public_key) if packet.public_key else None
+                if not sender_pub_key:
+                    # LoRa-relayed PKI packets don't carry the sender's public key in the
+                    # MeshPacket header — look it up from node_db (same as firmware does)
+                    from_node_hex = f"!{from_node:08x}"
+                    sender_pub_key = self.node_db.get_public_key(from_node_hex)
+                    if sender_pub_key:
+                        logger.debug(f"Using node_db public key for PKI decrypt from {from_node_hex}")
+            if sender_pub_key:
+                data = self.crypto.decrypt_pki(
+                    bytes(packet.encrypted), packet.id,
+                    getattr(packet, 'from'), sender_pub_key
+                )
+                if data:
+                    self.stats.successful_decrypts += 1
+                    logger.debug("Successfully PKI-decrypted packet")
+                else:
+                    self.stats.failed_decrypts += 1
+                    logger.debug("Failed to PKI-decrypt packet")
+            else:
+                logger.debug("PKI-encrypted packet missing sender public key (not in packet or node_db)")
+                self.stats.failed_decrypts += 1
         elif packet.HasField('encrypted'):
             data = self.crypto.decrypt_packet(packet, channel_id)
             if data:
@@ -444,7 +478,10 @@ class MeshtasticMQTTClient:
             print("Publisher not initialized")
             return False
 
-        result = self.publisher.send_text_message(text, to_node_id, channel, hop_limit)
+        node_id_normalized = '!' + to_node_id.lstrip('!@')
+        recipient_public_key = self.node_db.get_public_key(node_id_normalized)
+        result = self.publisher.send_text_message(text, to_node_id, channel, hop_limit,
+                                                  recipient_public_key=recipient_public_key)
 
         if not self.subscribe_mode:
             self.client.loop(timeout=0.1)

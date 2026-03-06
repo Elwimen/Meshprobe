@@ -154,7 +154,7 @@ class MessageParser:
             hw_model_name = None
             if user.hw_model:
                 try:
-                    hw_model_name = config_pb2.Config.DeviceConfig.HardwareModel.Name(user.hw_model)
+                    hw_model_name = mesh_pb2.HardwareModel.Name(user.hw_model)
                 except Exception:
                     pass
 
@@ -162,13 +162,16 @@ class MessageParser:
             if user.macaddr:
                 macaddr = ':'.join(f'{b:02X}' for b in user.macaddr)
 
+            public_key = bytes(user.public_key) if user.public_key else None
+
             node_info = NodeInfo(
                 node_id=user.id if user.id else None,
                 long_name=user.long_name if user.long_name else None,
                 short_name=user.short_name if user.short_name else None,
                 macaddr=macaddr,
                 hw_model=user.hw_model if user.hw_model else None,
-                hw_model_name=hw_model_name
+                hw_model_name=hw_model_name,
+                public_key=public_key
             )
 
             # Add to node database if available
@@ -178,7 +181,8 @@ class MessageParser:
                     long_name=node_info.long_name,
                     short_name=node_info.short_name,
                     hw_model=node_info.hw_model,
-                    macaddr=macaddr
+                    macaddr=macaddr,
+                    public_key=public_key
                 )
 
             return node_info

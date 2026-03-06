@@ -2,6 +2,7 @@
 Configuration dataclasses for Meshtastic MQTT client.
 """
 
+import base64
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,6 +58,12 @@ class EnvironmentMetrics:
 
 
 @dataclass
+class Keypair:
+    """X25519 keypair for PKI direct message encryption."""
+    private_key: str = ""  # base64-encoded 32-byte X25519 private key
+
+
+@dataclass
 class NodeConfig:
     """
     Node configuration with computed node_num from node_id.
@@ -98,6 +105,7 @@ class NodeConfig:
     has_default_channel: bool = True
     channels: dict = field(default_factory=dict)
     channel_map: dict = field(default_factory=dict)  # Maps channel index to name
+    keypair: Keypair = field(default_factory=Keypair)
 
     @staticmethod
     def _extract_value(data: dict | str | int, key: str, default):
@@ -134,6 +142,22 @@ class NodeConfig:
         if isinstance(self.environment_metrics, dict):
             env_data = {k: v for k, v in self.environment_metrics.items() if not k.startswith('_')}
             self.environment_metrics = EnvironmentMetrics(**env_data)
+
+        if isinstance(self.keypair, dict):
+            keypair_data = {k: v for k, v in self.keypair.items() if not k.startswith('_')}
+            self.keypair = Keypair(**keypair_data)
+
+        if self.keypair.private_key:
+            self._private_key_bytes = base64.b64decode(self.keypair.private_key)
+        else:
+            self._private_key_bytes = None
+
+    def get_public_key(self) -> Optional[bytes]:
+        """Derive and return the X25519 public key from the stored private key."""
+        if not self._private_key_bytes:
+            return None
+        from .crypto import CryptoEngine
+        return CryptoEngine.derive_public_key(self._private_key_bytes)
 
     def get_channel_name(self, channel_index: int) -> str:
         """
@@ -175,6 +199,23 @@ class NodeConfig:
                     if isinstance(value, dict) and 'name' in value:
                         channel_map[key] = value['name']
 
+            pki_data = data.get('pki', data.get('keypair', {}))
+
+            # Auto-generate and persist private key if not set
+            if not (pki_data or {}).get('private_key'):
+                from .crypto import CryptoEngine
+                private_bytes, public_bytes = CryptoEngine.generate_keypair()
+                priv_b64 = base64.b64encode(private_bytes).decode('ascii')
+                pub_b64 = base64.b64encode(public_bytes).decode('ascii')
+                if 'pki' not in data:
+                    data['pki'] = {'_comment': 'X25519 private key (base64-encoded 32 bytes). Auto-generated on first run.'}
+                data['pki']['private_key'] = priv_b64
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4)
+                print(f"Generated PKI keypair and saved to {path}")
+                print(f"  Public key: {pub_b64}")
+                pki_data = data['pki']
+
             return cls(
                 node_id=node_id,
                 long_name=data.get('long_name', 'Simulated Node'),
@@ -191,6 +232,7 @@ class NodeConfig:
                 has_default_channel=data.get('has_default_channel', True),
                 channels=channels_data,
                 channel_map=channel_map,
+                keypair=pki_data,
             )
         except FileNotFoundError as e:
             raise ConfigError(f"Config file not found: {path}") from e
@@ -390,6 +432,10 @@ def create_default_configs(server_path: str = "server_config.json",
             "_comment": "Modem preset"
         },
         "has_default_channel": True,
+        "pki": {
+            "private_key": "",
+            "_comment": "X25519 private key (base64-encoded 32 bytes). Leave empty to auto-generate each run, or paste a persistent key here."
+        },
         "position": {
             "latitude": 37.4127,
             "longitude": -122.0627,

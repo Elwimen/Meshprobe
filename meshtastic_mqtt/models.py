@@ -56,6 +56,7 @@ class NodeInfo:
     macaddr: Optional[str] = None
     hw_model: Optional[int] = None
     hw_model_name: Optional[str] = None
+    public_key: Optional[bytes] = None  # 32-byte X25519 public key for PKI DMs
 
 
 @dataclass

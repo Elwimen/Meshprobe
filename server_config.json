@@ -1,5 +1,5 @@
 {
-    "default": "liam",
+    "default": "cromesh",
     "servers": {
         "local": {
             "host": "192.168.1.218",
@@ -15,6 +15,18 @@
         },
         "public": {
             "host": "mqtt.meshtastic.org",
+            "port": 1883,
+            "username": "meshdev",
+            "password": "large4cats",
+            "topics": {
+                "publish": "msh/EU_868/9A",
+                "listen": [
+                    "msh/EU_868/9A/#"
+                ]
+            }
+        },
+        "cromesh": {
+            "host": "mqtt.cromesh.eu",
             "port": 1883,
             "username": "meshdev",
             "password": "large4cats",
