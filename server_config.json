@@ -2,14 +2,14 @@
     "default": "cromesh",
     "servers": {
         "local": {
-            "host": "192.168.1.218",
+            "host": "192.168.1.100",
             "port": 1883,
             "username": "local",
             "password": "local",
             "topics": {
-                "publish": "msh/EU_868/9A",
+                "publish": "msh/EU_868/",
                 "listen": [
-                    "msh/EU_868/9A/#"
+                    "msh/EU_868/#"
                 ]
             }
         },
@@ -19,9 +19,9 @@
             "username": "meshdev",
             "password": "large4cats",
             "topics": {
-                "publish": "msh/EU_868/9A",
+                "publish": "msh/EU_868/",
                 "listen": [
-                    "msh/EU_868/9A/#"
+                    "msh/EU_868/#"
                 ]
             }
         },
@@ -43,9 +43,9 @@
             "username": "uplink",
             "password": "uplink",
             "topics": {
-                "publish": "msh/EU_868/9A",
+                "publish": "msh/EU_868",
                 "listen": [
-                    "msh/EU_868/9A/#"
+                    "msh/EU_868/#"
                 ]
             }
         },
