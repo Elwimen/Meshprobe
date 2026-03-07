@@ -145,6 +145,8 @@ class MessageFormatter:
                 pass
         elif parsed_msg.portnum:
             lines.append(f"[{parsed_msg.portnum_name}] — no display handler for this packet type")
+        elif not parsed_msg.encrypted:
+            lines.append("No application payload (routing/network packet)")
         else:
             reason = "Unable to decode message"
             if parsed_msg.channel_hash is not None:
