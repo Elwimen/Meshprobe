@@ -519,7 +519,12 @@ class MeshtasticMQTTClient:
             print("Publisher not initialized")
             return False
 
-        node_id_normalized = '!' + to_node_id.lstrip('!@')
+        from .utils import resolve_node_id
+        try:
+            to_node_num = resolve_node_id(to_node_id, self.node_db)
+            node_id_normalized = f'!{to_node_num:08x}'
+        except (ValueError, Exception):
+            node_id_normalized = '!' + to_node_id.lstrip('!@/')
         recipient_public_key = self.node_db.get_public_key(node_id_normalized)
         result = self.publisher.send_text_message(text, to_node_id, channel, hop_limit,
                                                   recipient_public_key=recipient_public_key)
