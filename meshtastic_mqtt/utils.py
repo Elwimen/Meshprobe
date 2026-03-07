@@ -13,8 +13,10 @@ class NodeIdParser:
     UINT32_MAX = 0xFFFFFFFF
 
     SPECIAL_IDS = {
-        '^all': 0xFFFFFFFF,      # Broadcast to all nodes
-        '^local': None,          # Local node (needs context)
+        ':all': 0xFFFFFFFF,      # Broadcast to all nodes
+        '^all': 0xFFFFFFFF,      # Backward-compat alias (needs quoting in zsh)
+        ':local': None,          # Local node (needs context)
+        '^local': None,          # Backward-compat alias
     }
 
     @classmethod
@@ -23,7 +25,7 @@ class NodeIdParser:
         Parse and validate node ID from string (decimal or hex with @/!) or int.
 
         Args:
-            node_id: Node ID as string (e.g., "@ffffffff", "3663383912", "^all") or int
+            node_id: Node ID as string (e.g., "@ffffffff", "3663383912", ":all") or int
 
         Returns:
             Node ID as integer (uint32)
@@ -41,7 +43,7 @@ class NodeIdParser:
 
         if node_id.startswith('@') or node_id.startswith('!'):
             return cls._parse_hex(node_id)
-        elif node_id.startswith('^'):
+        elif node_id.startswith(':') or node_id.startswith('^'):
             return cls._parse_special(node_id)
         elif node_id.startswith('+'):
             raise NodeIdError(
@@ -80,20 +82,20 @@ class NodeIdParser:
 
     @classmethod
     def _parse_special(cls, node_id: str) -> int:
-        """Parse special node IDs (^all, ^local)."""
+        """Parse special node IDs (:all, :local)."""
         lower_id = node_id.lower()
 
         if lower_id not in cls.SPECIAL_IDS:
-            valid = ', '.join(cls.SPECIAL_IDS.keys())
+            valid = ':all'
             raise NodeIdError(
                 f"Unknown special node ID: '{node_id}'. "
                 f"Valid special IDs: {valid}"
             )
 
-        if lower_id == '^local':
+        if lower_id in (':local', '^local'):
             raise NodeIdError(
-                "Node ID '^local' requires local node context. "
-                "Use your actual node ID (@12345678) or @ffffffff for broadcast."
+                "Node ID ':local' requires local node context. "
+                "Use your actual node ID (@12345678) or :all for broadcast."
             )
 
         return cls.SPECIAL_IDS[lower_id]
@@ -199,6 +201,35 @@ def parse_node_id(node_id: str | int) -> int:
     except NodeIdError as e:
         # Convert to ValueError for backward compatibility
         raise ValueError(str(e)) from e
+
+
+def resolve_node_id(node_id_str: str, node_db) -> int:
+    """
+    Like parse_node_id but resolves /shortname via the node database.
+
+    Prefix rules:
+      @hexid   → hex node ID (e.g. @da548c90)
+      :all     → broadcast (0xFFFFFFFF)
+      /name    → short name lookup in node_db (e.g. /flky, /why0)
+      decimal  → plain integer
+
+    Args:
+        node_id_str: Node ID string (e.g. "@da548c90", "/flky", ":all", "3663383912")
+        node_db: NodeDatabase instance used for short name lookups
+
+    Returns:
+        Node ID as integer (uint32)
+
+    Raises:
+        ValueError: If the ID cannot be parsed or the short name is not found
+    """
+    if isinstance(node_id_str, str) and node_id_str.startswith('/'):
+        short_name = node_id_str[1:].lower()
+        for node_hex, node_data in node_db.nodes.items():
+            if node_data.get('short_name', '').lower() == short_name:
+                return int(node_hex.lstrip('!'), 16)
+        raise ValueError(f"No node found with short name '{node_id_str[1:]}' in node database")
+    return parse_node_id(node_id_str)
 
 
 def is_json_payload(payload: bytes) -> bool:
