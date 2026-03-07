@@ -97,6 +97,17 @@ class EnvironmentTelemetry:
 
 
 @dataclass
+class NetworkPacket:
+    """MeshPacket with no application payload — routing/network layer only."""
+    rx_snr: Optional[float] = None
+    rx_rssi: Optional[int] = None
+    priority: Optional[str] = None
+    transport_mechanism: Optional[str] = None
+    next_hop: Optional[str] = None   # hex node ID
+    relay_node: Optional[str] = None # hex node ID (8-bit suffix stored, expand to full)
+
+
+@dataclass
 class GenericTelemetry:
     """Telemetry variant not explicitly handled (local_stats, air_quality, power, health, etc.)."""
     variant: str = ""           # e.g. "local_stats", "air_quality_metrics"

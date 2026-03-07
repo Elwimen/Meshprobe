@@ -16,7 +16,7 @@ except ImportError:
 from .models import (
     PacketInfo, TextMessage, PositionData, NodeInfo,
     DeviceTelemetry, EnvironmentTelemetry, GenericTelemetry, RoutingInfo,
-    NeighborInfo, NeighborData, MapReport, Traceroute, ParsedMessage
+    NeighborInfo, NeighborData, MapReport, Traceroute, NetworkPacket, ParsedMessage
 )
 from .node_db import NodeDatabase
 from .logging_config import get_logger
@@ -355,6 +355,36 @@ class MessageParser:
         except (ValueError, AttributeError):
             return None
 
+    @staticmethod
+    def _parse_network_packet(packet) -> NetworkPacket:
+        """Parse a MeshPacket that carries no application payload."""
+        priority = None
+        if packet.priority:
+            try:
+                priority = mesh_pb2.MeshPacket.Priority.Name(packet.priority)
+            except ValueError:
+                priority = str(packet.priority)
+
+        transport = None
+        if packet.transport_mechanism:
+            try:
+                transport = mesh_pb2.MeshPacket.TransportMechanism.Name(packet.transport_mechanism)
+            except (ValueError, AttributeError):
+                transport = str(packet.transport_mechanism)
+
+        next_hop = f"!{packet.next_hop:08x}" if packet.next_hop else None
+        # relay_node is stored as an 8-bit suffix only
+        relay_node = f"!...{packet.relay_node:02x}" if packet.relay_node else None
+
+        return NetworkPacket(
+            rx_snr=packet.rx_snr if packet.rx_snr else None,
+            rx_rssi=packet.rx_rssi if packet.rx_rssi else None,
+            priority=priority,
+            transport_mechanism=transport,
+            next_hop=next_hop,
+            relay_node=relay_node,
+        )
+
     def create_parsed_message(
         self,
         msg,
@@ -396,6 +426,8 @@ class MessageParser:
             except ValueError:
                 portnum_name = f"UNKNOWN_PORTNUM_{portnum}"
             content = self.parse_message_content(portnum, data.payload, packet_info.from_node_hex, packet_info.to_node_hex)
+        elif not packet.HasField('encrypted'):
+            content = self._parse_network_packet(packet)
 
         return ParsedMessage(
             timestamp=timestamp,

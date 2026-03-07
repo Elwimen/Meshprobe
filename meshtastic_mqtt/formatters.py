@@ -15,7 +15,7 @@ except ImportError:
 from .models import (
     ParsedMessage, TextMessage, PositionData, NodeInfo,
     DeviceTelemetry, EnvironmentTelemetry, GenericTelemetry, RoutingInfo,
-    NeighborInfo, MapReport, Traceroute, Statistics
+    NeighborInfo, MapReport, Traceroute, NetworkPacket, Statistics
 )
 from .crypto import CryptoEngine
 from .node_db import NodeDatabase
@@ -145,7 +145,7 @@ class MessageFormatter:
                 pass
         elif parsed_msg.portnum:
             lines.append(f"[{parsed_msg.portnum_name}] — no display handler for this packet type")
-        elif not parsed_msg.encrypted:
+        elif not parsed_msg.encrypted and not parsed_msg.portnum:
             lines.append("No application payload (routing/network packet)")
         else:
             reason = "Unable to decode message"
@@ -187,6 +187,8 @@ class MessageFormatter:
                 return self._format_map_report(content)
             case Traceroute():
                 return self._format_traceroute(content)
+            case NetworkPacket():
+                return self._format_network_packet(content)
             case _:
                 return "Unknown message type"
 
@@ -316,6 +318,24 @@ class MessageFormatter:
             formatted_value = f"{value:{format_spec}}"
             lines.append(f"   {display_name:18s} {formatted_value}{unit}")
 
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_network_packet(pkt: NetworkPacket) -> str:
+        """Format a network-layer-only MeshPacket (no application payload)."""
+        lines = ["🌐 NETWORK PACKET (no application payload)"]
+        if pkt.transport_mechanism:
+            lines.append(f"   Transport:  {pkt.transport_mechanism}")
+        if pkt.priority:
+            lines.append(f"   Priority:   {pkt.priority}")
+        if pkt.rx_snr is not None:
+            lines.append(f"   RX SNR:     {pkt.rx_snr:+.2f} dB")
+        if pkt.rx_rssi is not None:
+            lines.append(f"   RX RSSI:    {pkt.rx_rssi} dBm")
+        if pkt.next_hop:
+            lines.append(f"   Next hop:   {pkt.next_hop}")
+        if pkt.relay_node:
+            lines.append(f"   Relay node: {pkt.relay_node}")
         return "\n".join(lines)
 
     @staticmethod
