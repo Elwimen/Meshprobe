@@ -15,7 +15,7 @@ except ImportError:
 
 from .models import (
     PacketInfo, TextMessage, PositionData, NodeInfo,
-    DeviceTelemetry, EnvironmentTelemetry, RoutingInfo,
+    DeviceTelemetry, EnvironmentTelemetry, GenericTelemetry, RoutingInfo,
     NeighborInfo, NeighborData, MapReport, Traceroute, ParsedMessage
 )
 from .node_db import NodeDatabase
@@ -239,6 +239,18 @@ class MessageParser:
                     self.node_db.add_environment_metrics(node_id=from_node_hex, **env_data)
 
                 return env_telem
+
+            # Handle all other telemetry variants generically
+            for variant in ('local_stats', 'air_quality_metrics', 'power_metrics',
+                            'health_metrics', 'host_metrics', 'traffic_management_stats'):
+                if telemetry.HasField(variant):
+                    sub = getattr(telemetry, variant)
+                    fields = {
+                        f.name: getattr(sub, f.name)
+                        for f in sub.DESCRIPTOR.fields
+                        if getattr(sub, f.name, 0) not in (0, 0.0, '', False, None)
+                    }
+                    return GenericTelemetry(variant=variant, fields=fields)
 
             return None
         except (ValueError, AttributeError) as e:

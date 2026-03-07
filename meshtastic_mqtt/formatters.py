@@ -14,7 +14,7 @@ except ImportError:
 
 from .models import (
     ParsedMessage, TextMessage, PositionData, NodeInfo,
-    DeviceTelemetry, EnvironmentTelemetry, RoutingInfo,
+    DeviceTelemetry, EnvironmentTelemetry, GenericTelemetry, RoutingInfo,
     NeighborInfo, MapReport, Traceroute, Statistics
 )
 from .crypto import CryptoEngine
@@ -172,6 +172,8 @@ class MessageFormatter:
                 return self._format_device_telemetry(content)
             case EnvironmentTelemetry():
                 return self._format_environment_telemetry(content)
+            case GenericTelemetry():
+                return self._format_generic_telemetry(content)
             case RoutingInfo():
                 return self._format_routing(content)
             case NeighborInfo():
@@ -309,6 +311,19 @@ class MessageFormatter:
             formatted_value = f"{value:{format_spec}}"
             lines.append(f"   {display_name:18s} {formatted_value}{unit}")
 
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_generic_telemetry(telemetry: GenericTelemetry) -> str:
+        """Format generic/unrecognised telemetry variant."""
+        label = telemetry.variant.replace('_', ' ').upper()
+        lines = [f"📊 TELEMETRY — {label}"]
+        for key, value in telemetry.fields.items():
+            display_key = key.replace('_', ' ').capitalize()
+            if isinstance(value, float):
+                lines.append(f"   {display_key:28s} {value:.2f}")
+            else:
+                lines.append(f"   {display_key:28s} {value}")
         return "\n".join(lines)
 
     @staticmethod

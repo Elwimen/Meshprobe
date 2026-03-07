@@ -97,6 +97,13 @@ class EnvironmentTelemetry:
 
 
 @dataclass
+class GenericTelemetry:
+    """Telemetry variant not explicitly handled (local_stats, air_quality, power, health, etc.)."""
+    variant: str = ""           # e.g. "local_stats", "air_quality_metrics"
+    fields: dict = field(default_factory=dict)  # non-zero field values
+
+
+@dataclass
 class RoutingInfo:
     """Routing message information."""
     error_reason: str = "ACK"
