@@ -194,7 +194,8 @@ class MessageFormatter:
 
     def _format_text_message(self, msg: TextMessage) -> str:
         """Format text message."""
-        lines = ["💬 TEXT MESSAGE"]
+        algo = msg.compression_algorithm.upper() if msg.compression_algorithm else "COMPRESSED"
+        lines = [f"💬 TEXT MESSAGE [{algo}]" if msg.is_compressed else "💬 TEXT MESSAGE"]
 
         # If upstream decryption already succeeded, trust that result
         if getattr(msg, 'decrypted', False):

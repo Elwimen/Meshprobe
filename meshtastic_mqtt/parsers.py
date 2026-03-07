@@ -57,6 +57,8 @@ class MessageParser:
             hops_away=hop_start - hop_limit if hop_start > 0 else 0,
             via_mqtt=packet.via_mqtt if hasattr(packet, 'via_mqtt') else False,
             want_ack=packet.want_ack if hasattr(packet, 'want_ack') else False,
+            rx_snr=packet.rx_snr if packet.rx_snr else None,
+            rx_rssi=packet.rx_rssi if packet.rx_rssi else None,
         )
 
     def parse_message_content(self, portnum: int, payload: bytes, from_node_hex: str = None, to_node_hex: str = None) -> Optional[
@@ -84,6 +86,8 @@ class MessageParser:
                 return self._parse_map_report(payload, from_node_hex)
             case portnums_pb2.TRACEROUTE_APP:
                 return self._parse_traceroute(payload)
+            case portnums_pb2.TEXT_MESSAGE_COMPRESSED_APP:
+                return self._parse_compressed_text_message(payload, from_node_hex, to_node_hex)
             case _:
                 return None
 
@@ -117,6 +121,45 @@ class MessageParser:
             )
 
         return TextMessage(text=text, is_openssl_encrypted=is_encrypted, is_salted_base64=is_salted_b64 if is_encrypted else None)
+
+    def _parse_compressed_text_message(self, payload: bytes, from_node_hex: str = None, to_node_hex: str = None) -> TextMessage:
+        """Parse compressed text message payload (TEXT_MESSAGE_COMPRESSED_APP)."""
+        from .text_compressor import decompress_auto, CompressionAlgorithm
+
+        # Check if the compressed payload is also OpenSSL-encrypted
+        is_salted_bytes = payload.startswith(b'Salted__')
+        is_salted_b64 = False
+        if not is_salted_bytes:
+            try:
+                as_str = payload.decode('utf-8', errors='strict')
+                is_salted_b64 = as_str.startswith('U2FsdGVk')
+            except UnicodeDecodeError:
+                pass
+
+        if is_salted_bytes or is_salted_b64:
+            text = payload.decode('utf-8', errors='replace') if is_salted_b64 else payload.decode('latin-1')
+            return TextMessage(text=text, is_openssl_encrypted=True, is_salted_base64=is_salted_b64,
+                               is_compressed=True)
+
+        # Known meshprobe algorithm header IDs (all except UNISHOX2 which sends no header)
+        headered_ids = {a.value for a in CompressionAlgorithm if a != CompressionAlgorithm.UNISHOX2}
+
+        if payload and payload[0] in headered_ids:
+            # Meshprobe-headered format: [1-byte algo ID] + compressed bytes
+            try:
+                algorithm_name = CompressionAlgorithm(payload[0]).name.lower()
+                text = decompress_auto(payload)
+                return TextMessage(text=text, is_compressed=True, compression_algorithm=algorithm_name)
+            except Exception as e:
+                return TextMessage(text=f"[decompression failed: {e}]", is_compressed=True)
+        else:
+            # Raw Unishox2 — Meshtastic firmware standard (no header byte)
+            try:
+                import unishox2
+                text = unishox2.decompress(payload, len(payload) * 8)
+                return TextMessage(text=text, is_compressed=True, compression_algorithm='unishox2')
+            except Exception as e:
+                return TextMessage(text=f"[decompression failed: {e}]", is_compressed=True)
 
     def _parse_position(self, payload: bytes, from_node_hex: str = None) -> Optional[PositionData]:
         """Parse position payload."""

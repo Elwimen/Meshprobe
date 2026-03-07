@@ -18,6 +18,7 @@ class MessageFilter:
         'neighbor': 'NEIGHBORINFO_APP',
         'map': 'MAP_REPORT_APP',
         'traceroute': 'TRACEROUTE_APP',
+        'ctext': 'TEXT_MESSAGE_COMPRESSED_APP',
     }
 
     def __init__(self, filter_types: Optional[dict] = None):

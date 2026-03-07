@@ -22,6 +22,8 @@ class PacketInfo:
     hops_away: int
     via_mqtt: bool
     want_ack: bool
+    rx_snr: Optional[float] = None
+    rx_rssi: Optional[int] = None
 
     def __str__(self) -> str:
         """String representation of packet info."""
@@ -35,6 +37,8 @@ class TextMessage:
     is_openssl_encrypted: bool = False
     is_salted_base64: bool | None = None
     decrypted: bool = False
+    is_compressed: bool = False
+    compression_algorithm: Optional[str] = None
 
 
 @dataclass
