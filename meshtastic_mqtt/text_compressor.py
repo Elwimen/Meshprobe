@@ -21,6 +21,9 @@ class CompressionAlgorithm(IntEnum):
     LZ4 = 0x02
     BROTLI = 0x03
     LZMA = 0x04
+    SNAPPY = 0x05
+    BZIP2 = 0x06
+    SMAZ = 0x07
 
 
 @dataclass
@@ -210,6 +213,58 @@ class LzmaCompressor(TextCompressor):
         return lzma.decompress(data)
 
 
+class SnappyCompressor(TextCompressor):
+    """Snappy compression (requires python-snappy package)."""
+
+    def __init__(self):
+        super().__init__(CompressionAlgorithm.SNAPPY)
+        try:
+            import snappy
+            self.snappy = snappy
+        except ImportError:
+            raise ImportError("snappy package required. Install with: pip install python-snappy")
+
+    def _compress_impl(self, data: bytes) -> bytes:
+        return self.snappy.compress(data)
+
+    def _decompress_impl(self, data: bytes) -> bytes:
+        return self.snappy.decompress(data)
+
+
+class Bzip2Compressor(TextCompressor):
+    """Bzip2 compression (built-in, no dependencies)."""
+
+    def __init__(self, compresslevel: int = 9):
+        super().__init__(CompressionAlgorithm.BZIP2)
+        self.compresslevel = compresslevel
+
+    def _compress_impl(self, data: bytes) -> bytes:
+        import bz2
+        return bz2.compress(data, compresslevel=self.compresslevel)
+
+    def _decompress_impl(self, data: bytes) -> bytes:
+        import bz2
+        return bz2.decompress(data)
+
+
+class SmazCompressor(TextCompressor):
+    """SMAZ compression for small strings (requires smaz package)."""
+
+    def __init__(self):
+        super().__init__(CompressionAlgorithm.SMAZ)
+        try:
+            import smaz
+            self.smaz = smaz
+        except ImportError:
+            raise ImportError("smaz package required. Install with: pip install smaz")
+
+    def _compress_impl(self, data: bytes) -> bytes:
+        return self.smaz.compress(data)
+
+    def _decompress_impl(self, data: bytes) -> bytes:
+        return self.smaz.decompress(data)
+
+
 def get_all_compressors() -> dict[str, TextCompressor]:
     """
     Get all available compressors.
@@ -223,6 +278,7 @@ def get_all_compressors() -> dict[str, TextCompressor]:
     # Built-in compressors (always available)
     compressors['zlib'] = ZlibCompressor()
     compressors['lzma'] = LzmaCompressor()
+    compressors['bzip2'] = Bzip2Compressor()
 
     # Optional compressors
     try:
@@ -237,6 +293,16 @@ def get_all_compressors() -> dict[str, TextCompressor]:
 
     try:
         compressors['brotli'] = BrotliCompressor()
+    except ImportError:
+        pass
+
+    try:
+        compressors['snappy'] = SnappyCompressor()
+    except ImportError:
+        pass
+
+    try:
+        compressors['smaz'] = SmazCompressor()
     except ImportError:
         pass
 
@@ -273,6 +339,9 @@ def decompress_auto(data: bytes) -> str:
         CompressionAlgorithm.LZ4: Lz4Compressor,
         CompressionAlgorithm.BROTLI: BrotliCompressor,
         CompressionAlgorithm.LZMA: LzmaCompressor,
+        CompressionAlgorithm.SNAPPY: SnappyCompressor,
+        CompressionAlgorithm.BZIP2: Bzip2Compressor,
+        CompressionAlgorithm.SMAZ: SmazCompressor,
     }
 
     compressor_class = compressor_map[algorithm]
