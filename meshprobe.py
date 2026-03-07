@@ -223,14 +223,14 @@ def main():
 
     map_parser = subparsers.add_parser('map', help='Publish position to mesh map, or send position to a specific node')
     map_parser.add_argument('node', nargs='?', default=None,
-                           help='Target node ID to send position to (e.g. @b4ed56e8). Omit to broadcast MapReport to the mesh map.')
+                           help='Target node ID to send position to (e.g. @b4ed56e8 or /flky). Omit to broadcast MapReport to the mesh map.')
     map_parser.add_argument('--hex-dump', action='store_true',
                            help='Show hex/ASCII dump of transmitted packets')
     map_parser.add_argument('--colored', action='store_true',
                            help='Use colored output in hex dump')
 
     text_parser = subparsers.add_parser('text', help='Send text message to a node')
-    text_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
+    text_parser.add_argument('to_node', help='Target node ID: hex (@da548c90), short name (/flky), decimal (3663383912), or :all')
     text_parser.add_argument('message', help='Message text')
     text_parser.add_argument('--openssl-password', type=str,
                             help='Encrypt text with OpenSSL salted format (AES-256-CBC) using this password')
@@ -246,7 +246,7 @@ def main():
                             help='Use colored output in hex dump')
 
     ctext_parser = subparsers.add_parser('ctext', help='Send compressed text message (TEXT_MESSAGE_COMPRESSED_APP)')
-    ctext_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
+    ctext_parser.add_argument('to_node', help='Target node ID: hex (@da548c90), short name (/flky), decimal (3663383912), or :all')
     ctext_parser.add_argument('message', help='Message text')
     ctext_parser.add_argument('--algorithm', type=str, default='brotli',
                               choices=['zlib', 'zstd', 'lz4', 'brotli', 'lzma', 'snappy', 'bzip2', 'smaz', 'unishox2'],
@@ -267,7 +267,7 @@ def main():
                               help='Use colored output in hex dump')
 
     pos_parser = subparsers.add_parser('position', help='Send position to a node')
-    pos_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
+    pos_parser.add_argument('to_node', help='Target node ID: hex (@da548c90), short name (/flky), decimal (3663383912), or :all')
     pos_parser.add_argument('--randomize', action='store_true',
                            help='Randomize position with Gaussian noise (±0.025°, similar to map command)')
     pos_parser.add_argument('--hex-dump', action='store_true',
@@ -292,9 +292,12 @@ def main():
         filter_out_arg.completer = filter_completer
     listen_parser.add_argument('--colored', action='store_true', help='Use colored output in hex dump')
     listen_parser.add_argument('--nodes', type=str,
-                               help='Only show packets from these nodes (comma-separated node IDs or short names, e.g. !da548c90,why0)')
+                               help='Only show packets involving these nodes (comma-separated, e.g. !da548c90,flky)')
 
-    nodeinfo_parser = subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
+    nodeinfo_parser = subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet, or send to a specific node')
+    nodeinfo_parser.add_argument('node', nargs='?', default=None,
+                                help='Target node ID (e.g. @da548c90 or /flky). Omit to broadcast. '
+                                     'When specified, sends unicast with want_response=true — the target replies with its own NodeInfo.')
     nodeinfo_parser.add_argument('--hex-dump', action='store_true',
                                 help='Show hex/ASCII dump of transmitted packets')
     nodeinfo_parser.add_argument('--colored', action='store_true',
@@ -526,7 +529,7 @@ def main():
             client.send_position_message(args.to_node, channel, hops, randomize)
             time.sleep(1)
         elif args.command == 'nodeinfo':
-            client.send_node_info()
+            client.send_node_info(getattr(args, 'node', None))
             time.sleep(1)
         elif args.command == 'telemetry':
             client.send_telemetry()

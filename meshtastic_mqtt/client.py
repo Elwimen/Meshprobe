@@ -163,17 +163,23 @@ class MeshtasticMQTTClient:
         """Return True if this node should be filtered out based on node_filter."""
         if not self.node_filter:
             return False
-        # Match by hex node ID (with or without ! prefix)
         node_id_bare = from_node_hex.lstrip('!')
+        node_data = self.node_db.nodes.get(from_node_hex, {})
+        short_name = node_data.get('short_name', '')
         for entry in self.node_filter:
-            entry_norm = entry.lstrip('!')
-            if entry_norm.lower() == node_id_bare.lower():
-                return False
-            # Match by short name from node_db
-            node_data = self.node_db.nodes.get(from_node_hex, {})
-            short_name = node_data.get('short_name', '')
-            if short_name and entry.lower() == short_name.lower():
-                return False
+            # Normalize prefixes: @/! → hex match, / → short name match, bare → try both
+            if entry.startswith('@') or entry.startswith('!'):
+                if entry.lstrip('@!').lower() == node_id_bare.lower():
+                    return False
+            elif entry.startswith('/'):
+                if short_name and entry[1:].lower() == short_name.lower():
+                    return False
+            else:
+                # Bare string: match against hex ID or short name
+                if entry.lower() == node_id_bare.lower():
+                    return False
+                if short_name and entry.lower() == short_name.lower():
+                    return False
         return True
 
     def _get_portnum_name(self, portnum: int) -> str:
@@ -452,7 +458,8 @@ class MeshtasticMQTTClient:
                 self.crypto.openssl_password,
                 getattr(self.client_config, 'openssl_send_base64', False),
                 openssl_iters,
-                fixed_salt
+                fixed_salt,
+                self.node_db,
             )
 
             return True
@@ -557,8 +564,8 @@ class MeshtasticMQTTClient:
 
         return result
 
-    def send_node_info(self) -> bool:
-        """Broadcast NODEINFO to announce this node."""
+    def send_node_info(self, to_node_id: str = None) -> bool:
+        """Broadcast NODEINFO, or send unicast with want_response if to_node_id is given."""
         if not self.connected:
             print("Not connected to MQTT broker")
             return False
@@ -567,7 +574,7 @@ class MeshtasticMQTTClient:
             print("Publisher not initialized")
             return False
 
-        result = self.publisher.send_node_info()
+        result = self.publisher.send_node_info(to_node_id)
 
         if not self.subscribe_mode:
             self.client.loop(timeout=0.1)

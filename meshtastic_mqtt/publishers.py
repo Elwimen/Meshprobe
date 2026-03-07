@@ -15,7 +15,7 @@ except ImportError as e:
 
 from .config import NodeConfig, ServerConfig
 from .crypto import CryptoEngine
-from .utils import parse_node_id
+from .utils import parse_node_id, resolve_node_id
 from .hex_dump import hex_dump
 from .formatters import SEPARATOR_WIDTH
 
@@ -53,7 +53,8 @@ class MessagePublisher:
     def __init__(self, client: mqtt.Client, node_config: NodeConfig, server_config: ServerConfig,
                  crypto_engine: CryptoEngine, hex_dump_mode=None, hex_dump_colored: bool = False,
                  openssl_password: str | None = None, openssl_send_base64: bool = False,
-                 openssl_iterations: int = 10000, openssl_fixed_salt: bytes | None = None):
+                 openssl_iterations: int = 10000, openssl_fixed_salt: bytes | None = None,
+                 node_db=None):
         """
         Initialize MessagePublisher.
 
@@ -76,6 +77,7 @@ class MessagePublisher:
         self.openssl_send_base64 = openssl_send_base64
         self.openssl_iterations = int(openssl_iterations) if openssl_iterations else 10000
         self.openssl_fixed_salt = openssl_fixed_salt
+        self.node_db = node_db
 
     def _print_hex_dump(self, payload: bytes, label: str = "Packet"):
         """Print hex dump of payload if enabled."""
@@ -150,7 +152,7 @@ class MessagePublisher:
     def send_text_message(self, text: str, to_node_id: str, channel: int = 0, hop_limit: int = 3,
                           recipient_public_key: bytes = None) -> bool:
         """Send a text message to a specific node."""
-        to_node_num = parse_node_id(to_node_id)
+        to_node_num = resolve_node_id(to_node_id, self.node_db)
         channel_name = self.node_config.get_channel_name(channel)
         channel_hash = self._get_channel_hash(channel)
 
@@ -208,7 +210,7 @@ class MessagePublisher:
 
         result = compressors[algorithm].compress(text)
 
-        to_node_num = parse_node_id(to_node_id)
+        to_node_num = resolve_node_id(to_node_id, self.node_db)
         channel_name = self.node_config.get_channel_name(channel)
         channel_hash = self._get_channel_hash(channel)
 
@@ -260,7 +262,7 @@ class MessagePublisher:
 
     def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3, randomize: bool = False) -> bool:
         """Send position to a specific node."""
-        to_node_num = parse_node_id(to_node_id)
+        to_node_num = resolve_node_id(to_node_id, self.node_db)
 
         if randomize:
             base_lat = self.node_config.position.latitude
@@ -460,8 +462,8 @@ class MessagePublisher:
         service_envelope.gateway_id = self.node_config.node_id
         return service_envelope
 
-    def send_node_info(self) -> bool:
-        """Send NODEINFO packet to broadcast our node information."""
+    def send_node_info(self, to_node_id: str = None) -> bool:
+        """Send NODEINFO packet. Broadcasts if to_node_id is None, otherwise sends unicast with want_response."""
         user = mesh_pb2.User()
         user.id = self.node_config.node_id
         user.long_name = self.node_config.long_name
@@ -471,17 +473,27 @@ class MessagePublisher:
         if pub_key:
             user.public_key = pub_key
 
+        if to_node_id:
+            to_node_num = resolve_node_id(to_node_id, self.node_db)
+            unicast = True
+        else:
+            to_node_num = 0xFFFFFFFF
+            unicast = False
+
         mesh_packet = self._create_base_mesh_packet(
-            to_node=0xFFFFFFFF,
+            to_node=to_node_num,
             portnum=portnums_pb2.NODEINFO_APP,
             payload=user.SerializeToString(),
             channel_hash=self._get_channel_hash(0),
             hop_limit=3,
-            want_response=True
+            want_response=unicast,
         )
         service_envelope = self._create_service_envelope(mesh_packet)
 
-        print(f"Sending NODEINFO for {self.node_config.long_name} ({self.node_config.node_id})")
+        if unicast:
+            print(f"Sending NODEINFO to !{to_node_num:08x} (want_response=true — target will reply with its NodeInfo)")
+        else:
+            print(f"Sending NODEINFO broadcast for {self.node_config.long_name} ({self.node_config.node_id})")
         print(f"Hardware: {self.node_config.hw_model}, Short name: {self.node_config.short_name}")
 
         payload = service_envelope.SerializeToString()
