@@ -193,6 +193,71 @@ class MessagePublisher:
                                      {"Message": text, "Channel": channel_id, "Encryption": encryption_mode},
                                      topic=topic)
 
+    def send_compressed_text_message(self, text: str, to_node_id: str, algorithm: str = 'brotli',
+                                      channel: int = 0, hop_limit: int = 3) -> bool:
+        """Send a compressed text message using TEXT_MESSAGE_COMPRESSED_APP portnum."""
+        from .text_compressor import get_all_compressors
+
+        compressors = get_all_compressors()
+        if algorithm not in compressors:
+            available = ', '.join(sorted(compressors.keys()))
+            print(f"Error: Algorithm '{algorithm}' not available. Available: {available}")
+            return False
+
+        LORA_MAX_PAYLOAD = 237
+
+        result = compressors[algorithm].compress(text)
+
+        to_node_num = parse_node_id(to_node_id)
+        channel_name = self.node_config.get_channel_name(channel)
+        channel_hash = self._get_channel_hash(channel)
+
+        payload = result.compressed_data
+
+        # Optionally apply OpenSSL encryption on top of the compressed bytes
+        if self.openssl_password:
+            try:
+                ce = CryptoEngine({}, self.openssl_password, self.openssl_iterations)
+                if self.openssl_send_base64:
+                    b64 = ce.encrypt_openssl_salted(payload, output="base64", salt=self.openssl_fixed_salt)
+                    payload = b64.encode('utf-8')
+                else:
+                    payload = ce.encrypt_openssl_salted(payload, output="bytes", salt=self.openssl_fixed_salt)
+                    try:
+                        import base64 as _b64
+                        print(f"Salted payload (base64): {_b64.b64encode(payload).decode('ascii')}")
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"Failed to OpenSSL-encrypt message: {e}")
+                return False
+
+        mesh_packet = self._create_base_mesh_packet(
+            to_node=to_node_num,
+            portnum=portnums_pb2.TEXT_MESSAGE_COMPRESSED_APP,
+            payload=payload,
+            channel_hash=channel_hash,
+            hop_limit=hop_limit,
+            want_ack=False,
+            channel_name=channel_name,
+        )
+
+        service_envelope = self._create_service_envelope(mesh_packet)
+        lora_fit = result.compressed_size <= LORA_MAX_PAYLOAD
+        size_str = f"{result.compressed_size} / {LORA_MAX_PAYLOAD} bytes ({result.ratio:.1f}% reduction)"
+        if not lora_fit:
+            size_str = f"\033[33m{size_str} — exceeds LoRa max, will not transmit over radio\033[0m"
+
+        encryption_label = "PKI" if False else ("PSK+OpenSSL" if self.openssl_password else "PSK")
+        return self._publish_message(service_envelope, to_node_num, "compressed text message", {
+            "Message": text,
+            "Channel": channel_name,
+            "Algorithm": algorithm.upper(),
+            "Original": f"{result.original_size} bytes",
+            "Compressed": size_str,
+            "Encryption": encryption_label,
+        })
+
     def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3, randomize: bool = False) -> bool:
         """Send position to a specific node."""
         to_node_num = parse_node_id(to_node_id)

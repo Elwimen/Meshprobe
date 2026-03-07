@@ -245,6 +245,27 @@ def main():
     text_parser.add_argument('--colored', action='store_true',
                             help='Use colored output in hex dump')
 
+    ctext_parser = subparsers.add_parser('ctext', help='Send compressed text message (TEXT_MESSAGE_COMPRESSED_APP)')
+    ctext_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
+    ctext_parser.add_argument('message', help='Message text')
+    ctext_parser.add_argument('--algorithm', type=str, default='brotli',
+                              choices=['zlib', 'zstd', 'lz4', 'brotli', 'lzma', 'snappy', 'bzip2', 'smaz', 'unishox2'],
+                              help='Compression algorithm (default: brotli)')
+    ctext_parser.add_argument('--openssl-password', type=str,
+                              help='Encrypt compressed data with OpenSSL salted format (AES-256-CBC) using this password')
+    ctext_parser.add_argument('--base64', action='store_true',
+                              help='When encrypting, send Base64 (U2FsdGVk...) instead of raw Salted__ bytes')
+    ctext_parser.add_argument('--pbkdf2-iter', type=int,
+                              help='PBKDF2-HMAC-SHA256 iteration count for SALTED encryption (default 10000)')
+    ctext_parser.add_argument('--openssl-fixed-salt', type=str,
+                              help='TEST ONLY: 16 hex chars (8 bytes) to fix OpenSSL salt')
+    ctext_parser.add_argument('--channel', type=int, default=0, help='Channel index (default: 0)')
+    ctext_parser.add_argument('--hops', type=int, default=3, help='Hop limit (default: 3)')
+    ctext_parser.add_argument('--hex-dump', action='store_true',
+                              help='Show hex/ASCII dump of transmitted packets')
+    ctext_parser.add_argument('--colored', action='store_true',
+                              help='Use colored output in hex dump')
+
     pos_parser = subparsers.add_parser('position', help='Send position to a node')
     pos_parser.add_argument('to_node', help='Target node ID (decimal or hex with @ prefix, e.g., 3663383912 or @da548c90)')
     pos_parser.add_argument('--randomize', action='store_true',
@@ -383,7 +404,7 @@ def main():
     # Parse and validate filter types
     filter_types = None
     if args.command == 'listen':
-        valid_types = {'text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'traceroute', 'network', 'encrypted', 'ascii', 'salted'}
+        valid_types = {'text', 'ctext', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'traceroute', 'network', 'encrypted', 'ascii', 'salted'}
 
         include_types = set()
         exclude_types = set()
@@ -421,7 +442,7 @@ def main():
             }
 
     # Store runtime options in client_config for publisher/crypto
-    if args.command == 'text':
+    if args.command in ('text', 'ctext'):
         setattr(client_config, 'openssl_send_base64', bool(getattr(args, 'base64', False)))
         if getattr(args, 'pbkdf2_iter', None) is not None:
             setattr(client_config, 'openssl_pbkdf2_iter', int(args.pbkdf2_iter))
@@ -486,6 +507,11 @@ def main():
             channel = getattr(args, 'channel', 0)
             hops = getattr(args, 'hops', 3)
             client.send_text_message(args.message, args.to_node, channel, hops)
+            time.sleep(1)
+        elif args.command == 'ctext':
+            channel = getattr(args, 'channel', 0)
+            hops = getattr(args, 'hops', 3)
+            client.send_compressed_text_message(args.message, args.to_node, args.algorithm, channel, hops)
             time.sleep(1)
         elif args.command == 'position':
             randomize = args.randomize if hasattr(args, 'randomize') else False

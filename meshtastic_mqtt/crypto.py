@@ -538,7 +538,7 @@ class CryptoEngine:
         ms = b''.join(m)
         return ms[:key_len], ms[key_len:key_len + iv_len]
 
-    def encrypt_openssl_salted(self, plaintext: str, password: Optional[str] = None, *,
+    def encrypt_openssl_salted(self, plaintext: str | bytes, password: Optional[str] = None, *,
                                output: str = "base64", key_size: int = 256,
                                iterations: Optional[int] = None, salt: Optional[bytes] = None) -> str | bytes:
         """Encrypt text into OpenSSL 'Salted__' blob using PBKDF2-HMAC-SHA256.
@@ -579,7 +579,7 @@ class CryptoEngine:
             raise ValueError("key_size must be 128 or 256")
 
         # PKCS7 padding
-        data = plaintext.encode('utf-8')
+        data = plaintext if isinstance(plaintext, bytes) else plaintext.encode('utf-8')
         pad_len = 16 - (len(data) % 16)
         padded = data + bytes([pad_len]) * pad_len
 

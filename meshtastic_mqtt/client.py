@@ -71,6 +71,7 @@ class MeshtasticMQTTClient:
         self.message_filter = MessageFilter(filter_types)
 
         self.publisher: Optional[MessagePublisher] = None
+        self._neighbor_candidates: dict = {}  # node_hex -> {snr, last_rx_time}
 
     def _subscribe_to_topics(self):
         """Subscribe to all configured listen topics."""
@@ -486,6 +487,24 @@ class MeshtasticMQTTClient:
         recipient_public_key = self.node_db.get_public_key(node_id_normalized)
         result = self.publisher.send_text_message(text, to_node_id, channel, hop_limit,
                                                   recipient_public_key=recipient_public_key)
+
+        if not self.subscribe_mode:
+            self.client.loop(timeout=0.1)
+
+        return result
+
+    def send_compressed_text_message(self, text: str, to_node_id: str, algorithm: str = 'brotli',
+                                     channel: int = 0, hop_limit: int = 3) -> bool:
+        """Send a compressed text message using TEXT_MESSAGE_COMPRESSED_APP portnum."""
+        if not self.connected:
+            print("Not connected to MQTT broker")
+            return False
+
+        if not self.publisher:
+            print("Publisher not initialized")
+            return False
+
+        result = self.publisher.send_compressed_text_message(text, to_node_id, algorithm, channel, hop_limit)
 
         if not self.subscribe_mode:
             self.client.loop(timeout=0.1)
