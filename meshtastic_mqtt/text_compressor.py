@@ -24,6 +24,7 @@ class CompressionAlgorithm(IntEnum):
     SNAPPY = 0x05
     BZIP2 = 0x06
     SMAZ = 0x07
+    UNISHOX2 = 0x08
 
 
 @dataclass
@@ -247,6 +248,44 @@ class Bzip2Compressor(TextCompressor):
         return bz2.decompress(data)
 
 
+class Unishox2Compressor(TextCompressor):
+    """Unishox2 compression — same algorithm used by Meshtastic firmware (requires unishox2-py3 package).
+
+    Sends raw Unishox2 bytes with NO algorithm header, matching the Meshtastic firmware standard.
+    All other compressors prepend a 1-byte meshprobe algorithm ID; unishox2 does not.
+    """
+
+    def __init__(self):
+        super().__init__(CompressionAlgorithm.UNISHOX2)
+        try:
+            import unishox2
+            self.unishox2 = unishox2
+        except ImportError:
+            raise ImportError("unishox2-py3 package required. Install with: pip install unishox2-py3")
+
+    def _compress_impl(self, data: bytes) -> bytes:
+        compressed, _ = self.unishox2.compress(data.decode('utf-8'))
+        return compressed
+
+    def _decompress_impl(self, data: bytes) -> bytes:
+        return self.unishox2.decompress(data, len(data) * 8).encode('utf-8')
+
+    def compress(self, text: str) -> CompressionResult:
+        """Compress without prepending the algorithm header byte."""
+        original_data = text.encode('utf-8')
+        start = time.perf_counter()
+        compressed = self._compress_impl(original_data)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        return CompressionResult(
+            original_size=len(original_data),
+            compressed_size=len(compressed),
+            algorithm=self.algorithm,
+            compressed_data=compressed,
+            compression_time_ms=elapsed_ms,
+            use_compressed=True,
+        )
+
+
 class SmazCompressor(TextCompressor):
     """SMAZ compression for small strings (requires smaz package)."""
 
@@ -259,10 +298,10 @@ class SmazCompressor(TextCompressor):
             raise ImportError("smaz package required. Install with: pip install smaz")
 
     def _compress_impl(self, data: bytes) -> bytes:
-        return self.smaz.compress(data)
+        return self.smaz.compress(data.decode('utf-8'))
 
     def _decompress_impl(self, data: bytes) -> bytes:
-        return self.smaz.decompress(data)
+        return self.smaz.decompress(data).encode('utf-8')
 
 
 def get_all_compressors() -> dict[str, TextCompressor]:
@@ -306,6 +345,11 @@ def get_all_compressors() -> dict[str, TextCompressor]:
     except ImportError:
         pass
 
+    try:
+        compressors['unishox2'] = Unishox2Compressor()
+    except ImportError:
+        pass
+
     return compressors
 
 
@@ -342,6 +386,7 @@ def decompress_auto(data: bytes) -> str:
         CompressionAlgorithm.SNAPPY: SnappyCompressor,
         CompressionAlgorithm.BZIP2: Bzip2Compressor,
         CompressionAlgorithm.SMAZ: SmazCompressor,
+        CompressionAlgorithm.UNISHOX2: Unishox2Compressor,
     }
 
     compressor_class = compressor_map[algorithm]
