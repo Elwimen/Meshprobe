@@ -60,7 +60,7 @@ def root_topic_completer(prefix, parsed_args, **kwargs):
 
 def filter_completer(prefix, parsed_args, **kwargs):
     """Custom completer for comma-separated filter types."""
-    valid_types = ['text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'encrypted', 'ascii']
+    valid_types = ['text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'traceroute', 'network', 'encrypted', 'ascii']
 
     # If there's a comma, complete after the last comma
     if ',' in prefix:
@@ -278,7 +278,7 @@ def main():
     # Parse and validate filter types
     filter_types = None
     if args.command == 'listen':
-        valid_types = {'text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'encrypted', 'ascii', 'salted'}
+        valid_types = {'text', 'position', 'nodeinfo', 'telemetry', 'routing', 'neighbor', 'map', 'traceroute', 'network', 'encrypted', 'ascii', 'salted'}
 
         include_types = set()
         exclude_types = set()

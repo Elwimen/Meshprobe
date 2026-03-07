@@ -283,6 +283,9 @@ class MeshtasticMQTTClient:
             if self.message_filter.should_filter_portnum(portnum_name):
                 logger.debug(f"Filtered out {portnum_name}")
                 return
+        elif not packet.HasField('encrypted') and self.message_filter.should_filter_network_packet():
+            logger.debug("Filtered out network packet")
+            return
 
         # If this is a text message that looks like raw 'Salted__' bytes, try Base64-normalized decryption first,
         # then fall back to bytes-based decrypt (for this test, we keep both paths available).

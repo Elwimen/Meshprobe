@@ -16,7 +16,8 @@ class MessageFilter:
         'telemetry': 'TELEMETRY_APP',
         'routing': 'ROUTING_APP',
         'neighbor': 'NEIGHBORINFO_APP',
-        'map': 'MAP_REPORT_APP'
+        'map': 'MAP_REPORT_APP',
+        'traceroute': 'TRACEROUTE_APP',
     }
 
     def __init__(self, filter_types: Optional[dict] = None):
@@ -44,6 +45,21 @@ class MessageFilter:
         if include and 'encrypted' not in include:
             return True
         if 'encrypted' in exclude:
+            return True
+
+        return False
+
+    def should_filter_network_packet(self) -> bool:
+        """Check if network-layer-only packets (no payload) should be filtered."""
+        if not self.filter_types:
+            return False
+
+        include = self.filter_types.get('include', set())
+        exclude = self.filter_types.get('exclude', set())
+
+        if include and 'network' not in include:
+            return True
+        if 'network' in exclude:
             return True
 
         return False
