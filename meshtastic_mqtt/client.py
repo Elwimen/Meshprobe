@@ -260,7 +260,8 @@ class MeshtasticMQTTClient:
                 )
 
                 # If raw dump was requested, print it first, then the failure block
-                failure = self.formatter.format_encrypted_failure(packet_info, encrypted_data)
+                failure = self.formatter.format_encrypted_failure(packet_info, encrypted_data,
+                                                                  channel_hash=packet.channel)
                 if raw_dump_text:
                     # Remove leading '=' line from failure to keep a single separator
                     first_nl = failure.find('\n')

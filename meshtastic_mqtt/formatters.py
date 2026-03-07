@@ -146,7 +146,10 @@ class MessageFormatter:
         elif parsed_msg.portnum:
             lines.append(f"[{parsed_msg.portnum_name}] — no display handler for this packet type")
         else:
-            lines.append("Unable to decode message")
+            reason = "Unable to decode message"
+            if parsed_msg.channel_hash is not None:
+                reason += f" (channel hash: 0x{parsed_msg.channel_hash:02x} — no matching PSK)"
+            lines.append(reason)
 
         # Show hex dump for decrypted payloads if enabled
         if self.hex_dump in ('decrypted', 'payload') and parsed_msg.decoded_payload_b64:
@@ -455,7 +458,8 @@ class MessageFormatter:
         lines.append("=" * MessageFormatter.SEPARATOR_WIDTH)
         return "\n".join(lines)
 
-    def format_encrypted_failure(self, packet_info, encrypted_data: bytes = None) -> str:
+    def format_encrypted_failure(self, packet_info, encrypted_data: bytes = None,
+                                 channel_hash: int = None) -> str:
         """Format message for failed decryption."""
         lines = []
         lines.append("=" * self.SEPARATOR_WIDTH)
@@ -467,7 +471,10 @@ class MessageFormatter:
             lines.append(f"🔒 Encrypted payload ({len(encrypted_data)} bytes):")
             lines.append(hex_dump(encrypted_data, use_color=self.hex_dump_colored))
         else:
-            lines.append("🔒 ENCRYPTED (unable to decrypt)")
+            reason = "🔒 Unable to decode message"
+            if channel_hash is not None:
+                reason += f" (channel hash: 0x{channel_hash:02x} — no matching PSK)"
+            lines.append(reason)
 
         lines.append("=" * self.SEPARATOR_WIDTH)
         return "\n".join(lines)

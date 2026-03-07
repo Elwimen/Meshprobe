@@ -163,6 +163,7 @@ class ParsedMessage:
     portnum: int
     portnum_name: str
     encrypted: bool
+    channel_hash: Optional[int] = None
     content: Optional[
         TextMessage | PositionData | NodeInfo | DeviceTelemetry |
         EnvironmentTelemetry | RoutingInfo | NeighborInfo | MapReport

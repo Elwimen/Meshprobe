@@ -406,6 +406,7 @@ class MessageParser:
             portnum=portnum,
             portnum_name=portnum_name,
             encrypted=packet.HasField('encrypted'),
+            channel_hash=packet.channel if packet.HasField('encrypted') else None,
             content=content,
             encrypted_payload_b64=encrypted_payload_b64,
             decoded_payload_b64=decoded_payload_b64,
