@@ -122,6 +122,15 @@ class NeighborInfo:
 
 
 @dataclass
+class Traceroute:
+    """Traceroute (RouteDiscovery) message."""
+    route: list[int] = field(default_factory=list)          # node IDs forward path
+    snr_towards: list[float] = field(default_factory=list)  # SNR for each forward hop
+    route_back: list[int] = field(default_factory=list)     # node IDs return path
+    snr_back: list[float] = field(default_factory=list)     # SNR for each return hop
+
+
+@dataclass
 class MapReport:
     """Map report information."""
     long_name: str

@@ -16,7 +16,7 @@ except ImportError:
 from .models import (
     PacketInfo, TextMessage, PositionData, NodeInfo,
     DeviceTelemetry, EnvironmentTelemetry, RoutingInfo,
-    NeighborInfo, NeighborData, MapReport, ParsedMessage
+    NeighborInfo, NeighborData, MapReport, Traceroute, ParsedMessage
 )
 from .node_db import NodeDatabase
 from .logging_config import get_logger
@@ -82,6 +82,8 @@ class MessageParser:
                 return self._parse_neighborinfo(payload)
             case portnums_pb2.MAP_REPORT_APP:
                 return self._parse_map_report(payload, from_node_hex)
+            case portnums_pb2.TRACEROUTE_APP:
+                return self._parse_traceroute(payload)
             case _:
                 return None
 
@@ -323,6 +325,20 @@ class MessageParser:
                 firmware_version=map_report.firmware_version,
                 region=region_name,
                 modem_preset=modem_preset_name
+            )
+        except (ValueError, AttributeError):
+            return None
+
+    def _parse_traceroute(self, payload: bytes) -> Optional[Traceroute]:
+        """Parse traceroute (RouteDiscovery) payload."""
+        try:
+            route_discovery = mesh_pb2.RouteDiscovery()
+            route_discovery.ParseFromString(payload)
+            return Traceroute(
+                route=list(route_discovery.route),
+                snr_towards=[s / 4.0 for s in route_discovery.snr_towards],
+                route_back=list(route_discovery.route_back),
+                snr_back=[s / 4.0 for s in route_discovery.snr_back],
             )
         except (ValueError, AttributeError):
             return None

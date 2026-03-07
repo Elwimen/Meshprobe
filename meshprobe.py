@@ -124,7 +124,9 @@ def main():
 
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
-    map_parser = subparsers.add_parser('map', help='Publish position to mesh map')
+    map_parser = subparsers.add_parser('map', help='Publish position to mesh map, or send position to a specific node')
+    map_parser.add_argument('node', nargs='?', default=None,
+                           help='Target node ID to send position to (e.g. @b4ed56e8). Omit to broadcast MapReport to the mesh map.')
     map_parser.add_argument('--hex-dump', action='store_true',
                            help='Show hex/ASCII dump of transmitted packets')
     map_parser.add_argument('--colored', action='store_true',
@@ -349,7 +351,10 @@ def main():
 
     try:
         if args.command == 'map':
-            client.publish_map_position()
+            if args.node:
+                client.send_position_message(args.node, randomize=True)
+            else:
+                client.publish_map_position()
             time.sleep(1)
         elif args.command == 'text':
             # openssl_password already attached to client/publisher in connect()

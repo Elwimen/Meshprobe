@@ -15,7 +15,7 @@ except ImportError:
 from .models import (
     ParsedMessage, TextMessage, PositionData, NodeInfo,
     DeviceTelemetry, EnvironmentTelemetry, RoutingInfo,
-    NeighborInfo, MapReport, Statistics
+    NeighborInfo, MapReport, Traceroute, Statistics
 )
 from .crypto import CryptoEngine
 from .node_db import NodeDatabase
@@ -143,6 +143,8 @@ class MessageFormatter:
                         lines.append(hex_dump(payload_bytes, use_color=self.hex_dump_colored))
             except Exception:
                 pass
+        elif parsed_msg.portnum:
+            lines.append(f"[{parsed_msg.portnum_name}] — no display handler for this packet type")
         else:
             lines.append("Unable to decode message")
 
@@ -176,6 +178,8 @@ class MessageFormatter:
                 return self._format_neighborinfo(content)
             case MapReport():
                 return self._format_map_report(content)
+            case Traceroute():
+                return self._format_traceroute(content)
             case _:
                 return "Unknown message type"
 
@@ -347,6 +351,55 @@ class MessageFormatter:
 
         if report.modem_preset:
             lines.append(f"   Modem:      {report.modem_preset}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_traceroute(trace: Traceroute) -> str:
+        """Format traceroute (RouteDiscovery) message."""
+        lines = ["🛤️  TRACEROUTE"]
+
+        def node_hex(node_id: int) -> str:
+            return f"!{node_id:08x}"
+
+        def snr_str(raw: float) -> str:
+            # INT8_MIN / 4 = -32.0 means "unknown SNR"
+            return "?" if raw <= -32.0 else f"{raw:+.1f}dB"
+
+        def format_hops(node_ids: list[int], snrs: list[float]) -> str:
+            parts = []
+            for i, nid in enumerate(node_ids):
+                label = node_hex(nid)
+                if i < len(snrs):
+                    label += f" ({snr_str(snrs[i])})"
+                parts.append(label)
+            return " → ".join(parts)
+
+        # snr_towards has route_count+1 entries: one per relay hop, plus the final hop to destination.
+        # For display, show relay hops with their SNRs, then the final-hop SNR appended.
+        relay_snrs = trace.snr_towards[:-1] if trace.snr_towards else []
+        final_snr = trace.snr_towards[-1] if trace.snr_towards else None
+        relay_snrs_back = trace.snr_back[:-1] if trace.snr_back else []
+        final_snr_back = trace.snr_back[-1] if trace.snr_back else None
+
+        if trace.route:
+            fwd = format_hops(trace.route, relay_snrs)
+            if final_snr is not None:
+                fwd += f" → dest ({snr_str(final_snr)})"
+            lines.append(f"   Forward:  {fwd}")
+        else:
+            direct = "(direct)"
+            if final_snr is not None:
+                direct += f" SNR: {snr_str(final_snr)}"
+            lines.append(f"   Forward:  {direct}")
+
+        if trace.route_back:
+            back = format_hops(trace.route_back, relay_snrs_back)
+            if final_snr_back is not None:
+                back += f" → origin ({snr_str(final_snr_back)})"
+            lines.append(f"   Return:   {back}")
+        elif trace.snr_back:
+            lines.append(f"   Return:   (direct) SNR: {snr_str(trace.snr_back[0])}")
 
         return "\n".join(lines)
 
