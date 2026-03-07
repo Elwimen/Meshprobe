@@ -121,6 +121,70 @@ def generate_neighbors_json(output_path: str, count: int):
         print(f"  {n['node_id']}  SNR: {n['snr']:+.2f} dB")
 
 
+def generate_neighbors_json_real(output_path: str, count, radius_km: float, node_config, nodes_dir: str):
+    """Generate neighbors.json from real nodes in the node database, filtered by distance."""
+    import random, math
+
+    from meshtastic_mqtt.node_db import NodeDatabase
+
+    our_lat = node_config.position.latitude
+    our_lon = node_config.position.longitude
+
+    def haversine_km(lat1, lon1, lat2, lon2):
+        R = 6371.0
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat / 2) ** 2
+             + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+        return R * 2 * math.asin(math.sqrt(a))
+
+    node_db = NodeDatabase(nodes_dir=nodes_dir, flush_interval=0)
+
+    candidates = []
+    for node_id, node_data in node_db.nodes.items():
+        pos = node_data.get('last_position')
+        if not pos or pos.get('latitude') is None or pos.get('longitude') is None:
+            continue
+        if node_id == node_config.node_id:
+            continue
+        dist = haversine_km(our_lat, our_lon, pos['latitude'], pos['longitude'])
+        if dist <= radius_km:
+            candidates.append((node_id, pos, dist))
+
+    if not candidates:
+        print(f"No nodes with GPS position found within {radius_km:.0f} km of our position "
+              f"({our_lat:.4f}, {our_lon:.4f})")
+        return
+
+    # Sort by distance so output is readable
+    candidates.sort(key=lambda x: x[2])
+
+    if count and count < len(candidates):
+        candidates = random.sample(candidates, count)
+        candidates.sort(key=lambda x: x[2])
+
+    neighbors = []
+    for node_id, pos, dist in candidates:
+        # Distance-proportional SNR: 0 km → ~+10 dB, radius_km → ~-20 dB, ±2 dB jitter
+        snr_base = 10.0 - (dist / radius_km) * 30.0
+        snr = round(snr_base + random.uniform(-2.0, 2.0), 2)
+        last_rx_time = int(pos.get('position_timestamp') or time.time())
+        neighbors.append({
+            "node_id": node_id,
+            "snr": snr,
+            "node_broadcast_interval_secs": 900,
+            "last_rx_time": last_rx_time,
+        })
+
+    data = {"node_broadcast_interval_secs": 900, "neighbors": neighbors}
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+    print(f"Generated {len(neighbors)} real neighbors within {radius_km:.0f} km → {output_path}")
+    for n, (_, _, dist) in zip(neighbors, candidates):
+        print(f"  {n['node_id']}  {dist:.1f} km  SNR: {n['snr']:+.2f} dB")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Meshtastic MQTT Client')
     parser.add_argument('--client-config', default='client_config.json',
@@ -225,9 +289,13 @@ def main():
     neighbor_parser.add_argument('--file', default='neighbors.json',
                                 help='Path to neighbors JSON file (default: neighbors.json)')
     neighbor_parser.add_argument('--generate', action='store_true',
-                                help='Generate a random neighbors.json file and exit (no MQTT needed)')
-    neighbor_parser.add_argument('--count', type=int, default=5,
-                                help='Number of random neighbors to generate (default: 5)')
+                                help='Generate a neighbors.json file and exit (no MQTT needed)')
+    neighbor_parser.add_argument('--real', action='store_true',
+                                help='Use real nodes from nodes/ database (requires --generate)')
+    neighbor_parser.add_argument('--count', type=int, default=None,
+                                help='Number of neighbors to include (default: 5 for random, all in radius for --real)')
+    neighbor_parser.add_argument('--radius', type=float, default=50.0,
+                                help='Radius in km to filter real nodes by distance (default: 50)')
     neighbor_parser.add_argument('--hex-dump', action='store_true',
                                 help='Show hex/ASCII dump of transmitted packets')
     neighbor_parser.add_argument('--colored', action='store_true',
@@ -370,10 +438,19 @@ def main():
             setattr(client_config, 'openssl_pbkdf2_iter', int(args.pbkdf2_iter))
 
     if args.command == 'neighbor' and getattr(args, 'generate', False):
-        generate_neighbors_json(
-            output_path=getattr(args, 'file', 'neighbors.json'),
-            count=getattr(args, 'count', 5),
-        )
+        if getattr(args, 'real', False):
+            generate_neighbors_json_real(
+                output_path=getattr(args, 'file', 'neighbors.json'),
+                count=getattr(args, 'count', None),
+                radius_km=getattr(args, 'radius', 50.0),
+                node_config=node_config,
+                nodes_dir=client_config.nodes_dir,
+            )
+        else:
+            generate_neighbors_json(
+                output_path=getattr(args, 'file', 'neighbors.json'),
+                count=getattr(args, 'count', None) or 5,
+            )
         return
 
     client = MeshtasticMQTTClient(server_config, node_config, client_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
