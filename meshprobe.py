@@ -441,6 +441,10 @@ def main():
         if getattr(args, 'pbkdf2_iter', None) is not None:
             setattr(client_config, 'openssl_pbkdf2_iter', int(args.pbkdf2_iter))
 
+    if args.command == 'neighbor' and getattr(args, 'real', False) and not getattr(args, 'generate', False):
+        print("Error: --real requires --generate")
+        sys.exit(1)
+
     if args.command == 'neighbor' and getattr(args, 'generate', False):
         if getattr(args, 'real', False):
             generate_neighbors_json_real(
