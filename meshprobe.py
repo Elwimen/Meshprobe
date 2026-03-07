@@ -92,6 +92,35 @@ def server_completer(prefix, parsed_args, **kwargs):
         return []
 
 
+def generate_neighbors_json(output_path: str, count: int):
+    """Generate a neighbors.json file with random realistic neighbor data."""
+    import random
+
+    neighbors = []
+    for _ in range(count):
+        node_id = random.randint(0x00000001, 0xFFFFFFFE)
+        snr = round(random.uniform(-20.0, 10.0), 2)
+        last_rx_time = int(time.time()) - random.randint(0, 3600)
+        neighbors.append({
+            "node_id": f"!{node_id:08x}",
+            "snr": snr,
+            "node_broadcast_interval_secs": 900,
+            "last_rx_time": last_rx_time,
+        })
+
+    data = {
+        "node_broadcast_interval_secs": 900,
+        "neighbors": neighbors,
+    }
+
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+    print(f"Generated {count} random neighbors → {output_path}")
+    for n in neighbors:
+        print(f"  {n['node_id']}  SNR: {n['snr']:+.2f} dB")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Meshtastic MQTT Client')
     parser.add_argument('--client-config', default='client_config.json',
@@ -195,6 +224,10 @@ def main():
     neighbor_parser = subparsers.add_parser('neighbor', help='Broadcast NEIGHBORINFO packet from JSON file')
     neighbor_parser.add_argument('--file', default='neighbors.json',
                                 help='Path to neighbors JSON file (default: neighbors.json)')
+    neighbor_parser.add_argument('--generate', action='store_true',
+                                help='Generate a random neighbors.json file and exit (no MQTT needed)')
+    neighbor_parser.add_argument('--count', type=int, default=5,
+                                help='Number of random neighbors to generate (default: 5)')
     neighbor_parser.add_argument('--hex-dump', action='store_true',
                                 help='Show hex/ASCII dump of transmitted packets')
     neighbor_parser.add_argument('--colored', action='store_true',
@@ -335,6 +368,13 @@ def main():
     elif args.command == 'listen':
         if getattr(args, 'pbkdf2_iter', None) is not None:
             setattr(client_config, 'openssl_pbkdf2_iter', int(args.pbkdf2_iter))
+
+    if args.command == 'neighbor' and getattr(args, 'generate', False):
+        generate_neighbors_json(
+            output_path=getattr(args, 'file', 'neighbors.json'),
+            count=getattr(args, 'count', 5),
+        )
+        return
 
     client = MeshtasticMQTTClient(server_config, node_config, client_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
 
