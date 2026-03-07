@@ -5,22 +5,24 @@ CLI toolkit for probing, inspecting, and interacting with Meshtastic networks ov
 ## Features
 
 - Listen to and decode Meshtastic MQTT traffic with hex dumps
-- Send text messages, positions, node info, and telemetry
+- Send text messages (plain or compressed), positions, node info, and telemetry
 - Publish to map reporting topics
-- Decrypt packets with channel PSK or OpenSSL encryption
-- Filter and analyze specific packet types
+- Decrypt packets with channel PSK, PKI (X25519), or OpenSSL encryption
+- Filter by packet type or specific nodes (by ID or short name)
 - Track and log node database locally
 
 ## Requirements
 
 - Python 3.10+
 - Packages: `paho-mqtt`, `meshtastic` (protobufs)
-- Optional: `argcomplete` (for tab completion)
+- Optional: `argcomplete` (tab completion), `zstandard`, `lz4`, `brotli`, `smaz-py3`, `unishox2-py3` (compression algorithms)
 
 ## Installation
 
 ```bash
 pip install paho-mqtt meshtastic argcomplete
+# Optional compression backends:
+pip install zstandard lz4 brotli smaz-py3 unishox2-py3
 ```
 
 ## Quick Start
@@ -28,8 +30,6 @@ pip install paho-mqtt meshtastic argcomplete
 1. Create default configs:
    ```bash
    python3 meshprobe.py --create-configs
-   # Or run as module:
-   python3 -m meshprobe --create-configs
    ```
    This creates `server_config.json`, `node_config.json`, and `client_config.json`.
 
@@ -38,8 +38,6 @@ pip install paho-mqtt meshtastic argcomplete
 3. Listen to messages:
    ```bash
    python3 meshprobe.py listen --duration 60
-   # Or run as module:
-   python3 -m meshprobe listen --duration 60
    ```
 
 ## Usage
@@ -48,31 +46,56 @@ Meshprobe can be run in two ways:
 - As a script: `python3 meshprobe.py <command>`
 - As a module: `python3 -m meshprobe <command>`
 
-### Basic Commands
+### Node ID formats
+
+All commands that take a target node accept the following formats:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `@hexid` | `@da548c90` | Hex node ID |
+| `/shortname` | `/flky` | Short name (resolved from node database) |
+| decimal | `3663383912` | Decimal node number |
+| `:all` | `:all` | Broadcast to all nodes |
+
+### Commands
 
 **Listen and inspect MQTT traffic:**
 ```bash
 python3 meshprobe.py listen --hex-dump decrypted --colored --filter text,position
+# Watch only specific nodes (by ID or short name, from or to):
+python3 meshprobe.py listen --nodes !da548c90,flky
 ```
 
 Hex dump modes: `full`, `payload`, `encrypted`, `decrypted`, `raw`
-Filter types: `text`, `position`, `nodeinfo`, `telemetry`, `routing`, `neighbor`, `map`, `encrypted`, `ascii`
+Filter types: `text`, `ctext`, `position`, `nodeinfo`, `telemetry`, `routing`, `neighbor`, `map`, `encrypted`, `ascii`
 
 **Send text message:**
 ```bash
 python3 meshprobe.py text @da548c90 "hello" --channel 0 --hops 3
+python3 meshprobe.py text /flky "hello"        # resolve by short name
 ```
 
 Optional encryption: `--openssl-password <pwd>`, `--pbkdf2-iter 10000`, `--base64`
 
+**Send compressed text message (`TEXT_MESSAGE_COMPRESSED_APP`, portnum 7):**
+```bash
+python3 meshprobe.py ctext /flky "hello" --algorithm brotli
+```
+
+Available algorithms: `zlib`, `zstd`, `lz4`, `brotli` (default), `lzma`, `bzip2`, `smaz`, `unishox2`
+
+The compressed payload size is shown relative to the 237-byte LoRa limit. A warning is displayed if the compressed output exceeds this limit.
+
 **Publish to map:**
 ```bash
-python3 meshprobe.py map --hex-dump
+python3 meshprobe.py map
+python3 meshprobe.py map /advt           # send position to a specific node
 ```
 
 **Send position:**
 ```bash
 python3 meshprobe.py position @da548c90 --randomize
+python3 meshprobe.py position /why0
 ```
 
 **Broadcast node info or telemetry:**
@@ -82,20 +105,33 @@ python3 meshprobe.py telemetry
 python3 meshprobe.py telemetry:env
 ```
 
+**Generate and broadcast neighbor info:**
+```bash
+# Generate random fake neighbors:
+python3 meshprobe.py neighbor --generate --count 5
+
+# Generate from real nodes in the node database within 50 km:
+python3 meshprobe.py neighbor --generate --real --radius 50
+
+# Broadcast the generated neighbor list:
+python3 meshprobe.py neighbor
+```
+
 ### Global Options
 
-- `--root-topic msh/US` - Override MQTT root topic (e.g., `msh/EU_868`)
-- `--psk <base64>` - Override PSK for all channels
+- `--root-topic msh/US` — Override MQTT root topic (e.g., `msh/EU_868`)
+- `--psk <base64>` — Override PSK for all channels
 
 ## Configuration Files
 
-**`server_config.json`** - MQTT broker settings (host, port, credentials)
+**`server_config.json`** — MQTT broker settings (host, port, credentials)
 
-**`node_config.json`** - Node identity and channel configuration
+**`node_config.json`** — Node identity and channel configuration
 - `node_id` must start with `!` (e.g., `"!12345678"`)
 - Define channels: `{ "0": { "name": "LongFast", "psk": "AQ==" } }`
+- PKI keypair is auto-generated on first run and stored under `pki.private_key`
 
-**`client_config.json`** - Local behavior (node DB flush interval, `nodes/` directory)
+**`client_config.json`** — Local behavior (node DB flush interval, `nodes/` directory)
 
 ## Output
 
@@ -103,16 +139,17 @@ Messages display with clear separators showing:
 - MQTT topic
 - From/to node IDs
 - Channel and packet ID
-- Message type and parsed content
+- Message type, byte size (`sz:`), and parsed content
 - Optional hex dumps (when enabled)
 
 On exit, a summary shows packet counts by type and decryption success/failure statistics.
 
 ## Tips
 
-- Tab completion is available with `argcomplete` for `--root-topic` and filter options
+- Tab completion is available with `argcomplete` for `--server`, `--root-topic`, and filter options
 - Node data is automatically logged to the `nodes/` directory
 - Use `--colored` for ANSI color output in hex dumps
+- PKI direct messages are sent automatically when the recipient's public key is known from a NodeInfo broadcast
 
 ## Troubleshooting
 
