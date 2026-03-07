@@ -37,7 +37,8 @@ class MeshtasticMQTTClient:
     def __init__(self, server_config: ServerConfig, node_config: NodeConfig,
                  client_config: ClientConfig, openssl_password: Optional[str] = None,
                  hex_dump: Optional[str] = None, hex_dump_colored: bool = False,
-                 filter_types: Optional[dict] = None):
+                 filter_types: Optional[dict] = None,
+                 node_filter: Optional[set] = None):
         """
         Initialize MeshtasticMQTTClient.
 
@@ -69,6 +70,8 @@ class MeshtasticMQTTClient:
         self.formatter = MessageFormatter(self.crypto, self.node_db, hex_dump, hex_dump_colored)
         self.stats = Statistics()
         self.message_filter = MessageFilter(filter_types)
+        # Normalize node filter: each entry is either '!hexid' or a short name string
+        self.node_filter: Optional[set] = node_filter
 
         self.publisher: Optional[MessagePublisher] = None
         self._neighbor_candidates: dict = {}  # node_hex -> {snr, last_rx_time}
@@ -156,6 +159,23 @@ class MeshtasticMQTTClient:
 
         self._handle_service_envelope(msg, raw_dump_text)
 
+    def _should_filter_node(self, from_node_hex: str) -> bool:
+        """Return True if this node should be filtered out based on node_filter."""
+        if not self.node_filter:
+            return False
+        # Match by hex node ID (with or without ! prefix)
+        node_id_bare = from_node_hex.lstrip('!')
+        for entry in self.node_filter:
+            entry_norm = entry.lstrip('!')
+            if entry_norm.lower() == node_id_bare.lower():
+                return False
+            # Match by short name from node_db
+            node_data = self.node_db.nodes.get(from_node_hex, {})
+            short_name = node_data.get('short_name', '')
+            if short_name and entry.lower() == short_name.lower():
+                return False
+        return True
+
     def _get_portnum_name(self, portnum: int) -> str:
         """
         Get portnum name with fallback for unknown values.
@@ -188,6 +208,15 @@ class MeshtasticMQTTClient:
 
         packet = service_envelope.packet
         channel_id = service_envelope.channel_id
+
+        # Apply node filter early — before any parsing or decryption
+        if self.node_filter:
+            from_node_num = getattr(packet, 'from')
+            from_node_hex = f"!{from_node_num:08x}"
+            to_node_hex = f"!{packet.to:08x}"
+            if self._should_filter_node(from_node_hex) and self._should_filter_node(to_node_hex):
+                logger.debug(f"Filtered out packet from {from_node_hex} to {to_node_hex} (not in node filter)")
+                return
 
         logger.debug(f"Packet fields: decoded={packet.HasField('decoded')}, encrypted={packet.HasField('encrypted')}")
         if packet.HasField('decoded'):

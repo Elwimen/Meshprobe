@@ -291,6 +291,8 @@ def main():
     if ARGCOMPLETE_AVAILABLE:
         filter_out_arg.completer = filter_completer
     listen_parser.add_argument('--colored', action='store_true', help='Use colored output in hex dump')
+    listen_parser.add_argument('--nodes', type=str,
+                               help='Only show packets from these nodes (comma-separated node IDs or short names, e.g. !da548c90,why0)')
 
     nodeinfo_parser = subparsers.add_parser('nodeinfo', help='Broadcast NODEINFO packet')
     nodeinfo_parser.add_argument('--hex-dump', action='store_true',
@@ -482,7 +484,11 @@ def main():
             )
         return
 
-    client = MeshtasticMQTTClient(server_config, node_config, client_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types)
+    node_filter = None
+    if args.command == 'listen' and getattr(args, 'nodes', None):
+        node_filter = {e.strip() for e in args.nodes.split(',') if e.strip()}
+
+    client = MeshtasticMQTTClient(server_config, node_config, client_config, openssl_password, hex_dump_mode, hex_dump_colored, filter_types, node_filter)
 
     use_listener_id = (args.command == 'listen')
     subscribe = (args.command == 'listen')
