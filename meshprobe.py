@@ -149,7 +149,7 @@ def generate_neighbors_json_real(output_path: str, count, radius_km: float, node
             continue
         dist = haversine_km(our_lat, our_lon, pos['latitude'], pos['longitude'])
         if dist <= radius_km:
-            candidates.append((node_id, pos, dist))
+            candidates.append((node_id, node_data, pos, dist))
 
     if not candidates:
         print(f"No nodes with GPS position found within {radius_km:.0f} km of our position "
@@ -157,19 +157,23 @@ def generate_neighbors_json_real(output_path: str, count, radius_km: float, node
         return
 
     # Sort by distance so output is readable
-    candidates.sort(key=lambda x: x[2])
+    candidates.sort(key=lambda x: x[3])
 
     if count and count < len(candidates):
         candidates = random.sample(candidates, count)
-        candidates.sort(key=lambda x: x[2])
+        candidates.sort(key=lambda x: x[3])
 
     neighbors = []
-    for node_id, pos, dist in candidates:
+    for node_id, node_data, pos, dist in candidates:
+        short_name = node_data.get('short_name', '')
+        long_name = node_data.get('long_name', '')
+        display_name = f"{short_name}/{long_name}" if short_name or long_name else node_id
         # Distance-proportional SNR: 0 km → ~+10 dB, radius_km → ~-20 dB, ±2 dB jitter
         snr_base = 10.0 - (dist / radius_km) * 30.0
         snr = round(snr_base + random.uniform(-2.0, 2.0), 2)
         last_rx_time = int(pos.get('position_timestamp') or time.time())
         neighbors.append({
+            "_name": display_name,
             "node_id": node_id,
             "snr": snr,
             "node_broadcast_interval_secs": 900,
@@ -181,8 +185,8 @@ def generate_neighbors_json_real(output_path: str, count, radius_km: float, node
         json.dump(data, f, indent=4)
 
     print(f"Generated {len(neighbors)} real neighbors within {radius_km:.0f} km → {output_path}")
-    for n, (_, _, dist) in zip(neighbors, candidates):
-        print(f"  {n['node_id']}  {dist:.1f} km  SNR: {n['snr']:+.2f} dB")
+    for n, (_, _, _, dist) in zip(neighbors, candidates):
+        print(f"  {n['node_id']}  {dist:.1f} km  SNR: {n['snr']:+.2f} dB  {n['_name']}")
 
 
 def main():
