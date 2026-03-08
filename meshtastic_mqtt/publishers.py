@@ -196,7 +196,8 @@ class MessagePublisher:
                                      topic=topic)
 
     def send_compressed_text_message(self, text: str, to_node_id: str, algorithm: str = 'brotli',
-                                      channel: int = 0, hop_limit: int = 3) -> bool:
+                                      channel: int = 0, hop_limit: int = 3,
+                                      recipient_public_key: bytes = None) -> bool:
         """Send a compressed text message using TEXT_MESSAGE_COMPRESSED_APP portnum."""
         from .text_compressor import get_all_compressors
 
@@ -242,23 +243,31 @@ class MessagePublisher:
             hop_limit=hop_limit,
             want_ack=False,
             channel_name=channel_name,
+            recipient_public_key=recipient_public_key,
         )
 
-        service_envelope = self._create_service_envelope(mesh_packet)
+        if mesh_packet.pki_encrypted:
+            channel_id = "PKI"
+            topic = f"{self.server_config.publish_topic}/2/e/PKI/{self.node_config.node_id}"
+            service_envelope = self._create_service_envelope(mesh_packet, channel_id)
+        else:
+            topic = None
+            service_envelope = self._create_service_envelope(mesh_packet)
+
         lora_fit = result.compressed_size <= LORA_MAX_PAYLOAD
         size_str = f"{result.compressed_size} / {LORA_MAX_PAYLOAD} bytes ({result.ratio:.1f}% reduction)"
         if not lora_fit:
             size_str = f"\033[33m{size_str} — exceeds LoRa max, will not transmit over radio\033[0m"
 
-        encryption_label = "PKI" if False else ("PSK+OpenSSL" if self.openssl_password else "PSK")
+        encryption_label = "PKI" if mesh_packet.pki_encrypted else ("PSK+OpenSSL" if self.openssl_password else "PSK")
         return self._publish_message(service_envelope, to_node_num, "compressed text message", {
             "Message": text,
-            "Channel": channel_name,
+            "Channel": "PKI" if mesh_packet.pki_encrypted else channel_name,
             "Algorithm": algorithm.upper(),
             "Original": f"{result.original_size} bytes",
             "Compressed": size_str,
             "Encryption": encryption_label,
-        })
+        }, topic=topic)
 
     def send_position_message(self, to_node_id: str, channel: int = 0, hop_limit: int = 3, randomize: bool = False) -> bool:
         """Send position to a specific node."""

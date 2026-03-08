@@ -545,7 +545,16 @@ class MeshtasticMQTTClient:
             print("Publisher not initialized")
             return False
 
-        result = self.publisher.send_compressed_text_message(text, to_node_id, algorithm, channel, hop_limit)
+        from .utils import resolve_node_id
+        try:
+            to_node_num = resolve_node_id(to_node_id, self.node_db)
+            node_id_normalized = f'!{to_node_num:08x}'
+        except (ValueError, Exception):
+            node_id_normalized = '!' + to_node_id.lstrip('!@/')
+        recipient_public_key = self.node_db.get_public_key(node_id_normalized)
+
+        result = self.publisher.send_compressed_text_message(text, to_node_id, algorithm, channel, hop_limit,
+                                                             recipient_public_key=recipient_public_key)
 
         if not self.subscribe_mode:
             self.client.loop(timeout=0.1)
