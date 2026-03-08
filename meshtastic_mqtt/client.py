@@ -58,8 +58,10 @@ class MeshtasticMQTTClient:
         self.connected = False
         self.subscribe_mode = False
 
+        import os
+        nodes_dir = os.path.join(client_config.nodes_dir, server_config.server_name)
         self.node_db = NodeDatabase(
-            nodes_dir=client_config.nodes_dir,
+            nodes_dir=nodes_dir,
             flush_interval=client_config.node_db_flush_interval
         )
         channel_keys = CryptoEngine.load_channel_keys(node_config.channels)

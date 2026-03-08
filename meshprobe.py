@@ -5,6 +5,7 @@ Entry point for the refactored meshtastic_mqtt package.
 """
 
 import sys
+import os
 import argparse
 import time
 import json
@@ -478,7 +479,7 @@ def main():
                 count=getattr(args, 'count', None),
                 radius_km=getattr(args, 'radius', 50.0),
                 node_config=node_config,
-                nodes_dir=client_config.nodes_dir,
+                nodes_dir=os.path.join(client_config.nodes_dir, server_config.server_name),
             )
         else:
             generate_neighbors_json(
@@ -543,7 +544,8 @@ def main():
             time.sleep(1)
         elif args.command == 'listen':
             print("Listening for messages...")
-            print(f"Logging node data to: nodes/")
+            nodes_dir = os.path.join(client_config.nodes_dir, server_config.server_name)
+            print(f"Logging node data to: {nodes_dir}/")
             if args.duration > 0:
                 print(f"Will listen for {args.duration} seconds")
                 time.sleep(args.duration)
@@ -554,7 +556,7 @@ def main():
                         time.sleep(1)
                 except KeyboardInterrupt:
                     print("\nStopping...")
-                    print(f"Node data saved to: nodes/")
+                    print(f"Node data saved to: {nodes_dir}/")
                     client.print_stats()
 
     finally:

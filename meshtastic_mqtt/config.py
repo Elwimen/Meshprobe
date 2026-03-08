@@ -334,9 +334,10 @@ class ServerConfig:
     password: str = "large4cats"
     publish_topic: str = "msh/US"
     listen_topics: list = field(default_factory=lambda: ["msh/US/#"])
+    server_name: str = "default"
 
     @classmethod
-    def from_server_profile(cls, profile: ServerProfile) -> 'ServerConfig':
+    def from_server_profile(cls, profile: ServerProfile, server_name: str = "default") -> 'ServerConfig':
         """Create ServerConfig from ServerProfile."""
         return cls(
             host=profile.host,
@@ -344,7 +345,8 @@ class ServerConfig:
             username=profile.username,
             password=profile.password,
             publish_topic=profile.topics.publish,
-            listen_topics=profile.topics.listen
+            listen_topics=profile.topics.listen,
+            server_name=server_name,
         )
 
     @classmethod
@@ -364,8 +366,9 @@ class ServerConfig:
             # Multi-server format with dataclasses
             if 'servers' in data:
                 config_file = ServerConfigFile.from_dict(data)
+                resolved_name = server_name if server_name else config_file.default
                 profile = config_file.get_server(server_name)
-                return cls.from_server_profile(profile)
+                return cls.from_server_profile(profile, server_name=resolved_name)
 
             # No servers key found
             raise ConfigError(
